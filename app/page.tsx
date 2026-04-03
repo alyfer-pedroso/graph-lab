@@ -1,86 +1,59 @@
-"use client"
+"use client";
 
-import { useEffect, useState, useRef } from "react"
-import {
-  Network,
-  Settings2,
-  Grid3X3,
-  BarChart3,
-  GitCompare,
-  HelpCircle,
-  Keyboard,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
-  Github,
-  Linkedin,
-} from "lucide-react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Button } from "@/components/ui/button"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-  TooltipProvider,
-} from "@/components/ui/tooltip"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogDescription,
-} from "@/components/ui/dialog"
-import { Slider } from "@/components/ui/slider"
-import { Input } from "@/components/ui/input"
-import { GraphCanvas, type GraphCanvasRef } from "@/components/graph-canvas"
-import { GraphToolbar } from "@/components/graph-toolbar"
-import { GraphManager } from "@/components/graph-manager"
-import { PropertiesPanel } from "@/components/properties-panel"
-import { MatrixPanel } from "@/components/matrix-panel"
-import { AnalysisPanel } from "@/components/analysis-panel"
-import { ComparisonPanel } from "@/components/comparison-panel"
-import { useGraphStore } from "@/lib/graph-store"
+import { useEffect, useState, useRef } from "react";
+import { Network, Settings2, Grid3X3, BarChart3, GitCompare, HelpCircle, Keyboard, ZoomIn, ZoomOut, RotateCcw, Github, Linkedin } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
+import { Slider } from "@/components/ui/slider";
+import { Input } from "@/components/ui/input";
+import { GraphCanvas, type GraphCanvasRef } from "@/components/graph-canvas";
+import { GraphToolbar } from "@/components/graph-toolbar";
+import { GraphManager } from "@/components/graph-manager";
+import { PropertiesPanel } from "@/components/properties-panel";
+import { MatrixPanel } from "@/components/matrix-panel";
+import { AnalysisPanel } from "@/components/analysis-panel";
+import { ComparisonPanel } from "@/components/comparison-panel";
+import { useGraphStore } from "@/lib/graph-store";
 
 export default function GraphSimulator() {
-  const { setTool, tool } = useGraphStore()
-  const [zoom, setZoom] = useState(1)
-  const canvasRef = useRef<GraphCanvasRef>(null)
+  const { setTool, tool } = useGraphStore();
+  const [zoom, setZoom] = useState(1);
+  const canvasRef = useRef<GraphCanvasRef>(null);
 
-  // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return
+        return;
       }
 
       switch (e.key.toLowerCase()) {
         case "v":
-          setTool("select")
-          break
+          setTool("select");
+          break;
         case "n":
-          setTool("vertex")
-          break
+          setTool("vertex");
+          break;
         case "e":
-          setTool("edge")
-          break
+          setTool("edge");
+          break;
         case "d":
-          setTool("delete")
-          break
+          setTool("delete");
+          break;
         case "h":
-          setTool("pan")
-          break
+          setTool("pan");
+          break;
       }
     }
 
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [setTool])
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [setTool]);
 
   return (
     <TooltipProvider>
       <div className="flex flex-col h-screen bg-background text-foreground">
-        {/* Header */}
         <header className="flex items-center justify-between px-4 py-2 border-b border-border bg-card">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
@@ -89,9 +62,7 @@ export default function GraphSimulator() {
               </div>
               <h1 className="font-bold text-lg">GraphLab</h1>
             </div>
-            <span className="text-xs text-muted-foreground hidden sm:inline">
-              Simulador de Teoria dos Grafos
-            </span>
+            <span className="text-xs text-muted-foreground hidden sm:inline">Simulador de Teoria dos Grafos</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -153,9 +124,7 @@ export default function GraphSimulator() {
                 <div className="space-y-4 text-sm">
                   <div>
                     <h4 className="font-semibold mb-1">Criar Vértices</h4>
-                    <p className="text-muted-foreground">
-                      Selecione a ferramenta de vértice (N) e clique no canvas para adicionar vértices.
-                    </p>
+                    <p className="text-muted-foreground">Selecione a ferramenta de vértice (N) e clique no canvas para adicionar vértices.</p>
                   </div>
                   <div>
                     <h4 className="font-semibold mb-1">Criar Arestas</h4>
@@ -165,9 +134,7 @@ export default function GraphSimulator() {
                   </div>
                   <div>
                     <h4 className="font-semibold mb-1">Editar Propriedades</h4>
-                    <p className="text-muted-foreground">
-                      Selecione um vértice ou aresta para editar seu nome, cor ou peso no painel direito.
-                    </p>
+                    <p className="text-muted-foreground">Selecione um vértice ou aresta para editar seu nome, cor ou peso no painel direito.</p>
                   </div>
                   <div>
                     <h4 className="font-semibold mb-1">Analisar Grafo</h4>
@@ -181,7 +148,7 @@ export default function GraphSimulator() {
                       Crie múltiplos grafos e use a aba Comparar para verificar isomorfismo e outras propriedades.
                     </p>
                   </div>
-                  
+
                   <div className="pt-4 mt-4 border-t border-border">
                     <p className="text-muted-foreground text-center mb-2">Criado por Alyfer Pedroso</p>
                     <div className="flex items-center justify-center gap-3">
@@ -209,19 +176,15 @@ export default function GraphSimulator() {
           </div>
         </header>
 
-        {/* Main Content */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Left Sidebar - Graph Manager */}
           <aside className="w-64 border-r border-border bg-card hidden md:flex flex-col">
             <GraphManager />
           </aside>
 
-          {/* Main Canvas Area */}
           <main className="flex-1 flex flex-col overflow-hidden">
-            {/* Toolbar */}
             <div className="p-2 border-b border-border flex items-center justify-between">
               <GraphToolbar />
-              
+
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span>Ferramenta:</span>
@@ -237,12 +200,7 @@ export default function GraphSimulator() {
                 <div className="flex items-center gap-2 border-l border-border pl-4">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => setZoom(Math.max(0.1, zoom - 0.1))}
-                      >
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setZoom(Math.max(0.1, zoom - 0.1))}>
                         <ZoomOut className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
@@ -250,21 +208,14 @@ export default function GraphSimulator() {
                   </Tooltip>
 
                   <div className="flex items-center gap-2 w-32">
-                    <Slider
-                      value={[zoom * 100]}
-                      min={10}
-                      max={300}
-                      step={10}
-                      onValueChange={([val]) => setZoom(val / 100)}
-                      className="w-20"
-                    />
+                    <Slider value={[zoom * 100]} min={10} max={300} step={10} onValueChange={([val]) => setZoom(val / 100)} className="w-20" />
                     <Input
                       type="number"
                       value={Math.round(zoom * 100)}
                       onChange={(e) => {
-                        const val = parseInt(e.target.value)
+                        const val = parseInt(e.target.value);
                         if (!isNaN(val)) {
-                          setZoom(Math.max(0.1, Math.min(3, val / 100)))
+                          setZoom(Math.max(0.1, Math.min(3, val / 100)));
                         }
                       }}
                       className="w-14 h-7 text-xs text-center"
@@ -276,12 +227,7 @@ export default function GraphSimulator() {
 
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => setZoom(Math.min(3, zoom + 0.1))}
-                      >
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setZoom(Math.min(3, zoom + 0.1))}>
                         <ZoomIn className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
@@ -290,12 +236,7 @@ export default function GraphSimulator() {
 
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => canvasRef.current?.resetView()}
-                      >
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => canvasRef.current?.resetView()}>
                         <RotateCcw className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
@@ -305,13 +246,11 @@ export default function GraphSimulator() {
               </div>
             </div>
 
-            {/* Canvas */}
             <div className="flex-1 p-4 overflow-hidden">
               <GraphCanvas ref={canvasRef} zoom={zoom} onZoomChange={setZoom} />
             </div>
           </main>
 
-          {/* Right Sidebar - Properties & Tools */}
           <aside className="w-80 border-l border-border bg-card hidden lg:flex flex-col">
             <Tabs defaultValue="properties" className="flex flex-col h-full">
               <TabsList className="w-full rounded-none border-b border-border bg-transparent p-0 h-auto">
@@ -378,5 +317,5 @@ export default function GraphSimulator() {
         </div>
       </div>
     </TooltipProvider>
-  )
+  );
 }
