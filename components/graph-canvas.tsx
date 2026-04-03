@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import { useGraphStore } from "@/lib/graph-store";
-import type { Vertex, Edge } from "@/lib/graph-types";
+import type { Vertex, Edge, Graph } from "@/lib/graph-types";
 
 interface GraphCanvasProps {
   graphId?: string;
@@ -11,14 +11,16 @@ interface GraphCanvasProps {
   height?: number;
   zoom?: number;
   onZoomChange?: (zoom: number) => void;
+  showAllGraphs?: boolean;
 }
 
 export interface GraphCanvasRef {
   resetView: () => void;
+  exportImage: (format: "png" | "jpeg") => void;
 }
 
 export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphCanvas(
-  { graphId, readOnly = false, width = 800, height = 600, zoom: externalZoom, onZoomChange },
+  { graphId, readOnly = false, width = 800, height = 600, zoom: externalZoom, onZoomChange, showAllGraphs = false },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -31,6 +33,10 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [internalZoom, setInternalZoom] = useState(1);
+
+  const [isDraggingGraph, setIsDraggingGraph] = useState(false);
+  const [draggingGraphId, setDraggingGraphId] = useState<string | null>(null);
+  const [graphDragStart, setGraphDragStart] = useState({ x: 0, y: 0, ox: 0, oy: 0 });
 
   const zoom = externalZoom ?? internalZoom;
   const setZoom = useCallback(
@@ -48,6 +54,25 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       resetView: () => {
         setPan({ x: 0, y: 0 });
         setZoom(1);
+      },
+      exportImage: (format: "png" | "jpeg") => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const link = document.createElement("a");
+        link.download = `grafo.${format}`;
+        if (format === "jpeg") {
+          const offscreen = document.createElement("canvas");
+          offscreen.width = canvas.width;
+          offscreen.height = canvas.height;
+          const ctx2 = offscreen.getContext("2d")!;
+          ctx2.fillStyle = "#ffffff";
+          ctx2.fillRect(0, 0, offscreen.width, offscreen.height);
+          ctx2.drawImage(canvas, 0, 0);
+          link.href = offscreen.toDataURL("image/jpeg", 0.95);
+        } else {
+          link.href = canvas.toDataURL("image/png");
+        }
+        link.click();
       },
     }),
     [setZoom],
@@ -71,10 +96,13 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     clearSelection,
     startEdgeCreation,
     cancelEdgeCreation,
+    moveGraphOffset,
   } = useGraphStore();
 
   const targetGraphId = graphId || activeGraphId;
-  const graph = graphs.find((g) => g.id === targetGraphId);
+  const activeGraph = graphs.find((g) => g.id === targetGraphId);
+
+  const graphsToRender = showAllGraphs ? graphs.filter((g) => g.visible) : activeGraph ? [activeGraph] : [];
 
   useEffect(() => {
     const container = containerRef.current;
@@ -93,7 +121,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !graph) return;
+    if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -119,52 +147,87 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       ctx.stroke();
     }
 
-    ctx.save();
-    ctx.translate(pan.x, pan.y);
-    ctx.scale(zoom, zoom);
+    for (const graph of graphsToRender) {
+      ctx.save();
+      ctx.globalAlpha = graph.opacity;
+      ctx.translate(pan.x + graph.offsetX * zoom, pan.y + graph.offsetY * zoom);
+      ctx.scale(zoom, zoom);
 
-    graph.edges.forEach((edge) => {
-      const source = graph.vertices.find((v) => v.id === edge.source);
-      const target = graph.vertices.find((v) => v.id === edge.target);
-      if (!source || !target) return;
+      graph.edges.forEach((edge) => {
+        const source = graph.vertices.find((v) => v.id === edge.source);
+        const target = graph.vertices.find((v) => v.id === edge.target);
+        if (!source || !target) return;
 
-      const isSelected = selectedEdgeIds.includes(edge.id);
+        const isActive = graph.id === activeGraphId;
+        const isSelected = isActive && selectedEdgeIds.includes(edge.id);
 
-      if (edge.source === edge.target) {
-        drawLoop(ctx, source, edge, graph.directed, isSelected);
-      } else {
-        drawEdge(ctx, source, target, edge, graph.directed, isSelected);
+        if (edge.source === edge.target) {
+          drawLoop(ctx, source, edge, graph.directed, isSelected, isActive);
+        } else {
+          drawEdge(ctx, source, target, edge, graph.directed, isSelected, isActive);
+        }
+      });
+
+      if (graph.id === activeGraphId && isCreatingEdge && edgeSourceId) {
+        const sourceVertex = graph.vertices.find((v) => v.id === edgeSourceId);
+        if (sourceVertex) {
+          ctx.strokeStyle = "#22c55e";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.moveTo(sourceVertex.x, sourceVertex.y);
+
+          const mx = (mousePos.x - pan.x - graph.offsetX * zoom) / zoom;
+          const my = (mousePos.y - pan.y - graph.offsetY * zoom) / zoom;
+          ctx.lineTo(mx, my);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
-    });
 
-    if (isCreatingEdge && edgeSourceId) {
-      const sourceVertex = graph.vertices.find((v) => v.id === edgeSourceId);
-      if (sourceVertex) {
-        ctx.strokeStyle = "#22c55e";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        ctx.moveTo(sourceVertex.x, sourceVertex.y);
-        ctx.lineTo(mousePos.x - pan.x, mousePos.y - pan.y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
+      graph.vertices.forEach((vertex) => {
+        const isActive = graph.id === activeGraphId;
+        const isSelected = isActive && selectedVertexIds.includes(vertex.id);
+        const isEdgeSource = isActive && vertex.id === edgeSourceId;
+        drawVertex(ctx, vertex, isSelected, isEdgeSource, isActive);
+      });
+
+      ctx.restore();
     }
 
-    graph.vertices.forEach((vertex) => {
-      const isSelected = selectedVertexIds.includes(vertex.id);
-      const isEdgeSource = vertex.id === edgeSourceId;
-      drawVertex(ctx, vertex, isSelected, isEdgeSource);
-    });
-
-    ctx.restore();
-  }, [graph, canvasSize, pan, zoom, selectedVertexIds, selectedEdgeIds, isCreatingEdge, edgeSourceId, mousePos]);
+    if (showAllGraphs && activeGraph && tool === "pan") {
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+      const handleX = pan.x + activeGraph.offsetX * zoom;
+      const handleY = pan.y + activeGraph.offsetY * zoom;
+      ctx.strokeStyle = "#3b82f6";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(handleX - 8, handleY - 8, 16, 16);
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+  }, [
+    graphsToRender,
+    activeGraph,
+    canvasSize,
+    pan,
+    zoom,
+    selectedVertexIds,
+    selectedEdgeIds,
+    isCreatingEdge,
+    edgeSourceId,
+    mousePos,
+    activeGraphId,
+    tool,
+    showAllGraphs,
+  ]);
 
   useEffect(() => {
     draw();
   }, [draw]);
 
-  function drawVertex(ctx: CanvasRenderingContext2D, vertex: Vertex, isSelected: boolean, isEdgeSource: boolean) {
+  function drawVertex(ctx: CanvasRenderingContext2D, vertex: Vertex, isSelected: boolean, isEdgeSource: boolean, isActive: boolean) {
     const radius = 24;
 
     if (isSelected || isEdgeSource) {
@@ -182,6 +245,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     } else if (isEdgeSource) {
       gradient.addColorStop(0, "#4ade80");
       gradient.addColorStop(1, "#16a34a");
+    } else if (!isActive) {
+      gradient.addColorStop(0, vertex.color || "#6366f1");
+      gradient.addColorStop(1, vertex.color ? adjustColor(vertex.color, -50) : "#312e81");
     } else {
       gradient.addColorStop(0, vertex.color || "#6366f1");
       gradient.addColorStop(1, vertex.color ? adjustColor(vertex.color, -30) : "#4f46e5");
@@ -189,7 +255,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     ctx.fillStyle = gradient;
     ctx.fill();
 
-    ctx.strokeStyle = isSelected ? "#93c5fd" : isEdgeSource ? "#86efac" : "#818cf8";
+    ctx.strokeStyle = isSelected ? "#93c5fd" : isEdgeSource ? "#86efac" : isActive ? "#818cf8" : "#4b5563";
     ctx.lineWidth = 2;
     ctx.stroke();
 
@@ -202,7 +268,15 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     ctx.fillText(vertex.label, vertex.x, vertex.y);
   }
 
-  function drawEdge(ctx: CanvasRenderingContext2D, source: Vertex, target: Vertex, edge: Edge, directed: boolean, isSelected: boolean) {
+  function drawEdge(
+    ctx: CanvasRenderingContext2D,
+    source: Vertex,
+    target: Vertex,
+    edge: Edge,
+    directed: boolean,
+    isSelected: boolean,
+    isActive: boolean,
+  ) {
     const dx = target.x - source.x;
     const dy = target.y - source.y;
     const angle = Math.atan2(dy, dx);
@@ -213,10 +287,12 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     const endX = target.x - radius * Math.cos(angle);
     const endY = target.y - radius * Math.sin(angle);
 
+    const edgeColor = isSelected ? "#3b82f6" : isActive ? "#6b7280" : "#374151";
+
     ctx.beginPath();
     ctx.moveTo(startX, startY);
     ctx.lineTo(endX, endY);
-    ctx.strokeStyle = isSelected ? "#3b82f6" : "#6b7280";
+    ctx.strokeStyle = edgeColor;
     ctx.lineWidth = isSelected ? 3 : 2;
     ctx.stroke();
 
@@ -229,7 +305,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       ctx.lineTo(endX - arrowLength * Math.cos(angle - arrowAngle), endY - arrowLength * Math.sin(angle - arrowAngle));
       ctx.moveTo(endX, endY);
       ctx.lineTo(endX - arrowLength * Math.cos(angle + arrowAngle), endY - arrowLength * Math.sin(angle + arrowAngle));
-      ctx.strokeStyle = isSelected ? "#3b82f6" : "#6b7280";
+      ctx.strokeStyle = edgeColor;
       ctx.lineWidth = 2;
       ctx.stroke();
     }
@@ -252,16 +328,18 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     }
   }
 
-  function drawLoop(ctx: CanvasRenderingContext2D, vertex: Vertex, edge: Edge, directed: boolean, isSelected: boolean) {
+  function drawLoop(ctx: CanvasRenderingContext2D, vertex: Vertex, edge: Edge, directed: boolean, isSelected: boolean, isActive: boolean) {
     const vertexRadius = 24;
     const loopRadius = 20;
 
     const loopCenterX = vertex.x + vertexRadius * 0.7;
     const loopCenterY = vertex.y - vertexRadius * 0.7;
 
+    const edgeColor = isSelected ? "#3b82f6" : isActive ? "#6b7280" : "#374151";
+
     ctx.beginPath();
     ctx.arc(loopCenterX, loopCenterY, loopRadius, 0, Math.PI * 2);
-    ctx.strokeStyle = isSelected ? "#3b82f6" : "#6b7280";
+    ctx.strokeStyle = edgeColor;
     ctx.lineWidth = isSelected ? 3 : 2;
     ctx.stroke();
 
@@ -278,7 +356,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       ctx.lineTo(arrowX - arrowLength * Math.cos(angle - arrowAngle), arrowY - arrowLength * Math.sin(angle - arrowAngle));
       ctx.moveTo(arrowX, arrowY);
       ctx.lineTo(arrowX - arrowLength * Math.cos(angle + arrowAngle), arrowY - arrowLength * Math.sin(angle + arrowAngle));
-      ctx.strokeStyle = isSelected ? "#3b82f6" : "#6b7280";
+      ctx.strokeStyle = edgeColor;
       ctx.lineWidth = 2;
       ctx.stroke();
     }
@@ -320,44 +398,52 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     };
   }
 
-  function getVertexAtPosition(x: number, y: number): Vertex | null {
-    if (!graph) return null;
-    const adjustedX = (x - pan.x) / zoom;
-    const adjustedY = (y - pan.y) / zoom;
+  function screenToGraph(screenX: number, screenY: number, graph: Graph): { x: number; y: number } {
+    return {
+      x: (screenX - pan.x - graph.offsetX * zoom) / zoom,
+      y: (screenY - pan.y - graph.offsetY * zoom) / zoom,
+    };
+  }
+
+  function getVertexAtPosition(x: number, y: number, graph?: Graph): Vertex | null {
+    const targetGraphs = graph ? [graph] : showAllGraphs ? graphsToRender : activeGraph ? [activeGraph] : [];
     const radius = 24;
 
-    for (let i = graph.vertices.length - 1; i >= 0; i--) {
-      const vertex = graph.vertices[i];
-      const dx = adjustedX - vertex.x;
-      const dy = adjustedY - vertex.y;
-      if (dx * dx + dy * dy <= radius * radius) {
-        return vertex;
+    for (const g of [...targetGraphs].reverse()) {
+      const local = screenToGraph(x, y, g);
+      for (let i = g.vertices.length - 1; i >= 0; i--) {
+        const vertex = g.vertices[i];
+        const dx = local.x - vertex.x;
+        const dy = local.y - vertex.y;
+        if (dx * dx + dy * dy <= radius * radius) {
+          return vertex;
+        }
       }
     }
     return null;
   }
 
-  function getEdgeAtPosition(x: number, y: number): Edge | null {
-    if (!graph) return null;
-    const adjustedX = (x - pan.x) / zoom;
-    const adjustedY = (y - pan.y) / zoom;
+  function getEdgeAtPosition(x: number, y: number, graph?: Graph): Edge | null {
+    const targetGraphs = graph ? [graph] : showAllGraphs ? graphsToRender : activeGraph ? [activeGraph] : [];
     const vertexRadius = 24;
     const loopRadius = 20;
 
-    for (const edge of graph.edges) {
-      const source = graph.vertices.find((v) => v.id === edge.source);
-      const target = graph.vertices.find((v) => v.id === edge.target);
-      if (!source || !target) continue;
+    for (const g of targetGraphs) {
+      const local = screenToGraph(x, y, g);
+      for (const edge of g.edges) {
+        const source = g.vertices.find((v) => v.id === edge.source);
+        const target = g.vertices.find((v) => v.id === edge.target);
+        if (!source || !target) continue;
 
-      if (edge.source === edge.target) {
-        const loopCenterX = source.x + vertexRadius * 0.7;
-        const loopCenterY = source.y - vertexRadius * 0.7;
-        const distToLoopCenter = Math.sqrt((adjustedX - loopCenterX) ** 2 + (adjustedY - loopCenterY) ** 2);
-
-        if (Math.abs(distToLoopCenter - loopRadius) < 8) return edge;
-      } else {
-        const dist = distanceToLineSegment(adjustedX, adjustedY, source.x, source.y, target.x, target.y);
-        if (dist < 10) return edge;
+        if (edge.source === edge.target) {
+          const loopCenterX = source.x + vertexRadius * 0.7;
+          const loopCenterY = source.y - vertexRadius * 0.7;
+          const distToLoopCenter = Math.sqrt((local.x - loopCenterX) ** 2 + (local.y - loopCenterY) ** 2);
+          if (Math.abs(distToLoopCenter - loopRadius) < 8) return edge;
+        } else {
+          const dist = distanceToLineSegment(local.x, local.y, source.x, source.y, target.x, target.y);
+          if (dist < 10) return edge;
+        }
       }
     }
     return null;
@@ -378,14 +464,30 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     const pos = getMousePosition(e);
     setMousePos(pos);
 
-    if (tool === "pan" || e.button === 1) {
+    if (e.button === 1) {
       setIsPanning(true);
       setPanStart({ x: pos.x - pan.x, y: pos.y - pan.y });
       return;
     }
 
-    const vertex = getVertexAtPosition(pos.x, pos.y);
-    const edge = getEdgeAtPosition(pos.x, pos.y);
+    if (tool === "pan" && showAllGraphs && activeGraph) {
+      const vertexOnActive = getVertexAtPosition(pos.x, pos.y, activeGraph);
+      if (!vertexOnActive) {
+        setIsDraggingGraph(true);
+        setDraggingGraphId(activeGraph.id);
+        setGraphDragStart({ x: pos.x, y: pos.y, ox: activeGraph.offsetX, oy: activeGraph.offsetY });
+        return;
+      }
+    }
+
+    if (tool === "pan") {
+      setIsPanning(true);
+      setPanStart({ x: pos.x - pan.x, y: pos.y - pan.y });
+      return;
+    }
+
+    const vertex = getVertexAtPosition(pos.x, pos.y, activeGraph || undefined);
+    const edge = getEdgeAtPosition(pos.x, pos.y, activeGraph || undefined);
 
     switch (tool) {
       case "select":
@@ -401,8 +503,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         break;
 
       case "vertex":
-        if (!vertex) {
-          addVertex((pos.x - pan.x) / zoom, (pos.y - pan.y) / zoom);
+        if (!vertex && activeGraph) {
+          const local = screenToGraph(pos.x, pos.y, activeGraph);
+          addVertex(local.x, local.y);
         }
         break;
 
@@ -441,8 +544,17 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       return;
     }
 
-    if (isDragging && dragVertex && !readOnly) {
-      moveVertex(dragVertex, (pos.x - pan.x) / zoom, (pos.y - pan.y) / zoom);
+    if (isDraggingGraph && draggingGraphId) {
+      const dx = (pos.x - graphDragStart.x) / zoom;
+      const dy = (pos.y - graphDragStart.y) / zoom;
+      const store = useGraphStore.getState();
+      store.setGraphOffset(draggingGraphId, graphDragStart.ox + dx, graphDragStart.oy + dy);
+      return;
+    }
+
+    if (isDragging && dragVertex && !readOnly && activeGraph) {
+      const local = screenToGraph(pos.x, pos.y, activeGraph);
+      moveVertex(dragVertex, local.x, local.y);
     }
   }
 
@@ -450,6 +562,8 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     setIsDragging(false);
     setDragVertex(null);
     setIsPanning(false);
+    setIsDraggingGraph(false);
+    setDraggingGraphId(null);
   }
 
   function handleContextMenu(e: React.MouseEvent<HTMLCanvasElement>) {
@@ -479,13 +593,17 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     setZoom(zoom + delta);
   }
 
+  let cursorStyle = "crosshair";
+  if (tool === "pan") cursorStyle = isDraggingGraph || isPanning ? "grabbing" : "grab";
+  else if (tool === "delete") cursorStyle = "pointer";
+
   return (
-    <div ref={containerRef} className="relative w-full h-full min-h-100 bg-background rounded-lg overflow-hidden border border-border">
+    <div ref={containerRef} className="relative w-full h-full min-h-75 bg-background rounded-lg overflow-hidden border border-border">
       <canvas
         ref={canvasRef}
         width={canvasSize.width}
         height={canvasSize.height}
-        className="cursor-crosshair"
+        style={{ cursor: cursorStyle }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -495,7 +613,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         onWheel={handleWheel}
         tabIndex={0}
       />
-      {!graph && <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">Nenhum grafo selecionado</div>}
+      {graphsToRender.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">Nenhum grafo selecionado</div>
+      )}
     </div>
   );
 });

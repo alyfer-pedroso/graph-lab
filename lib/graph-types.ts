@@ -22,6 +22,11 @@ export interface Graph {
   edges: Edge[];
   directed: boolean;
   weighted: boolean;
+
+  opacity: number;
+  visible: boolean;
+  offsetX: number;
+  offsetY: number;
 }
 
 export type Tool = "select" | "vertex" | "edge" | "delete" | "pan";
@@ -38,11 +43,9 @@ export interface GraphState {
   compareGraphId: string | null;
 }
 
-// Matrix types
 export type AdjacencyMatrix = number[][];
 export type IncidenceMatrix = number[][];
 
-// Analysis results
 export interface PathResult {
   path: string[];
   distance: number;
