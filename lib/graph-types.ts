@@ -27,6 +27,8 @@ export interface Graph {
   visible: boolean;
   offsetX: number;
   offsetY: number;
+
+  defaultVertexColor?: string;
 }
 
 export type Tool = "select" | "vertex" | "edge" | "delete" | "pan";
