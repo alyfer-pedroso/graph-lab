@@ -6,6 +6,23 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 11);
 }
 
+const GRAPH_COLORS = [
+  "#6366f1", // indigo
+  "#22c55e", // green
+  "#f59e0b", // amber
+  "#ec4899", // pink
+  "#06b6d4", // cyan
+  "#f97316", // orange
+  "#a855f7", // purple
+  "#14b8a6", // teal
+  "#ef4444", // red
+  "#3b82f6", // blue
+];
+
+function getGraphDefaultColor(graphIndex: number): string {
+  return GRAPH_COLORS[graphIndex % GRAPH_COLORS.length];
+}
+
 function createDefaultGraph(): Graph {
   return {
     id: generateId(),
@@ -89,10 +106,11 @@ export const useGraphStore = create<GraphStore>((set, get) => {
     // Graph management
     createGraph: (name, directed = false, weighted = false) => {
       const id = generateId();
-      const graphCount = get().graphs.length + 1;
+      const currentGraphs = get().graphs;
+      const graphIndex = currentGraphs.length;
       const newGraph: Graph = {
         id,
-        name: name || `Grafo ${graphCount}`,
+        name: name || `Grafo ${graphIndex + 1}`,
         vertices: [],
         edges: [],
         directed,
@@ -101,6 +119,7 @@ export const useGraphStore = create<GraphStore>((set, get) => {
         visible: true,
         offsetX: 0,
         offsetY: 0,
+        defaultVertexColor: getGraphDefaultColor(graphIndex),
       };
       set((state) => ({
         graphs: [...state.graphs, newGraph],
@@ -139,10 +158,12 @@ export const useGraphStore = create<GraphStore>((set, get) => {
     },
 
     duplicateGraph: (id) => {
-      const graph = get().graphs.find((g) => g.id === id);
+      const state = get();
+      const graph = state.graphs.find((g) => g.id === id);
       if (!graph) return "";
 
       const newId = generateId();
+      const graphIndex = state.graphs.length;
       const newGraph: Graph = {
         ...graph,
         id: newId,
@@ -151,6 +172,7 @@ export const useGraphStore = create<GraphStore>((set, get) => {
         edges: graph.edges.map((e) => ({ ...e })),
         offsetX: graph.offsetX + 20,
         offsetY: graph.offsetY + 20,
+        defaultVertexColor: graph.defaultVertexColor || getGraphDefaultColor(graphIndex),
       };
 
       set((state) => ({
@@ -174,11 +196,16 @@ export const useGraphStore = create<GraphStore>((set, get) => {
       if (!activeGraph) return null;
 
       const existingLabels = activeGraph.vertices.map((v) => v.label);
+      // Usa a cor padrão do grafo, ou a primeira cor da paleta
+      const graphIndex = get().graphs.findIndex((g) => g.id === activeGraph.id);
+      const defaultColor = activeGraph.defaultVertexColor || getGraphDefaultColor(graphIndex);
+
       const newVertex: Vertex = {
         id: generateId(),
         label: label || generateVertexLabel(existingLabels),
         x,
         y,
+        color: defaultColor,
       };
 
       set((state) => ({
