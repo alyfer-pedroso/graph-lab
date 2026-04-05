@@ -6,18 +6,7 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 11);
 }
 
-const GRAPH_COLORS = [
-  "#6366f1", // indigo
-  "#22c55e", // green
-  "#f59e0b", // amber
-  "#ec4899", // pink
-  "#06b6d4", // cyan
-  "#f97316", // orange
-  "#a855f7", // purple
-  "#14b8a6", // teal
-  "#ef4444", // red
-  "#3b82f6", // blue
-];
+const GRAPH_COLORS = ["#6366f1", "#22c55e", "#f59e0b", "#ec4899", "#06b6d4", "#f97316", "#a855f7", "#14b8a6", "#ef4444", "#3b82f6"];
 
 function getGraphDefaultColor(graphIndex: number): string {
   return GRAPH_COLORS[graphIndex % GRAPH_COLORS.length];
@@ -39,52 +28,43 @@ function createDefaultGraph(): Graph {
 }
 
 interface GraphStore extends GraphState {
-  // Graph management
   createGraph: (name?: string, directed?: boolean, weighted?: boolean) => string;
   deleteGraph: (id: string) => void;
   setActiveGraph: (id: string | null) => void;
   updateGraph: (id: string, updates: Partial<Graph>) => void;
   duplicateGraph: (id: string) => string;
   clearGraph: (id: string) => void;
+  importGraph: (graphData: Omit<Graph, "id"> & { id?: string }) => string;
 
-  // Vertex management
   addVertex: (x: number, y: number, label?: string) => string | null;
   updateVertex: (id: string, updates: Partial<Vertex>) => void;
   deleteVertex: (id: string) => void;
   moveVertex: (id: string, x: number, y: number) => void;
 
-  // Edge management
   addEdge: (source: string, target: string, label?: string, weight?: number) => string | null;
   updateEdge: (id: string, updates: Partial<Edge>) => void;
   deleteEdge: (id: string) => void;
 
-  // Selection
   selectVertex: (id: string, addToSelection?: boolean) => void;
   selectEdge: (id: string, addToSelection?: boolean) => void;
   clearSelection: () => void;
 
-  // Tool
   setTool: (tool: Tool) => void;
 
-  // Edge creation
   startEdgeCreation: (sourceId: string) => void;
   cancelEdgeCreation: () => void;
 
-  // Compare mode
   setCompareMode: (enabled: boolean) => void;
   setCompareGraph: (id: string | null) => void;
 
-  // Auto-labeling
   autoLabelVertices: () => void;
   autoLabelEdges: () => void;
 
-  // Layer management
   setGraphOpacity: (id: string, opacity: number) => void;
   setGraphVisible: (id: string, visible: boolean) => void;
   setGraphOffset: (id: string, offsetX: number, offsetY: number) => void;
   moveGraphOffset: (id: string, dx: number, dy: number) => void;
 
-  // Utilities
   getActiveGraph: () => Graph | null;
   getCompareGraph: () => Graph | null;
 }
@@ -103,7 +83,6 @@ export const useGraphStore = create<GraphStore>((set, get) => {
     compareMode: false,
     compareGraphId: null,
 
-    // Graph management
     createGraph: (name, directed = false, weighted = false) => {
       const id = generateId();
       const currentGraphs = get().graphs;
@@ -126,6 +105,33 @@ export const useGraphStore = create<GraphStore>((set, get) => {
         activeGraphId: id,
       }));
       return id;
+    },
+
+    importGraph: (graphData) => {
+      const id = graphData.id || generateId();
+      const currentGraphs = get().graphs;
+      const graphIndex = currentGraphs.length;
+      const newGraph: Graph = {
+        id,
+        name: graphData.name || `Grafo importado`,
+        vertices: graphData.vertices || [],
+        edges: graphData.edges || [],
+        directed: graphData.directed ?? false,
+        weighted: graphData.weighted ?? false,
+        opacity: graphData.opacity ?? 1,
+        visible: graphData.visible ?? true,
+        offsetX: graphData.offsetX ?? 0,
+        offsetY: graphData.offsetY ?? 0,
+        defaultVertexColor: graphData.defaultVertexColor || getGraphDefaultColor(graphIndex),
+      };
+      // Avoid ID collision — generate a fresh ID
+      const safeId = currentGraphs.some((g) => g.id === id) ? generateId() : id;
+      newGraph.id = safeId;
+      set((state) => ({
+        graphs: [...state.graphs, newGraph],
+        activeGraphId: safeId,
+      }));
+      return safeId;
     },
 
     deleteGraph: (id) => {
@@ -190,13 +196,11 @@ export const useGraphStore = create<GraphStore>((set, get) => {
       }));
     },
 
-    // Vertex management
     addVertex: (x, y, label) => {
       const activeGraph = get().getActiveGraph();
       if (!activeGraph) return null;
 
       const existingLabels = activeGraph.vertices.map((v) => v.label);
-      // Usa a cor padrão do grafo, ou a primeira cor da paleta
       const graphIndex = get().graphs.findIndex((g) => g.id === activeGraph.id);
       const defaultColor = activeGraph.defaultVertexColor || getGraphDefaultColor(graphIndex);
 
@@ -217,12 +221,7 @@ export const useGraphStore = create<GraphStore>((set, get) => {
     updateVertex: (id, updates) => {
       set((state) => ({
         graphs: state.graphs.map((g) =>
-          g.id === state.activeGraphId
-            ? {
-                ...g,
-                vertices: g.vertices.map((v) => (v.id === id ? { ...v, ...updates } : v)),
-              }
-            : g,
+          g.id === state.activeGraphId ? { ...g, vertices: g.vertices.map((v) => (v.id === id ? { ...v, ...updates } : v)) } : g,
         ),
       }));
     },
@@ -245,17 +244,11 @@ export const useGraphStore = create<GraphStore>((set, get) => {
     moveVertex: (id, x, y) => {
       set((state) => ({
         graphs: state.graphs.map((g) =>
-          g.id === state.activeGraphId
-            ? {
-                ...g,
-                vertices: g.vertices.map((v) => (v.id === id ? { ...v, x, y } : v)),
-              }
-            : g,
+          g.id === state.activeGraphId ? { ...g, vertices: g.vertices.map((v) => (v.id === id ? { ...v, x, y } : v)) } : g,
         ),
       }));
     },
 
-    // Edge management
     addEdge: (source, target, label, weight) => {
       const activeGraph = get().getActiveGraph();
       if (!activeGraph) return null;
@@ -288,12 +281,7 @@ export const useGraphStore = create<GraphStore>((set, get) => {
     updateEdge: (id, updates) => {
       set((state) => ({
         graphs: state.graphs.map((g) =>
-          g.id === state.activeGraphId
-            ? {
-                ...g,
-                edges: g.edges.map((e) => (e.id === id ? { ...e, ...updates } : e)),
-              }
-            : g,
+          g.id === state.activeGraphId ? { ...g, edges: g.edges.map((e) => (e.id === id ? { ...e, ...updates } : e)) } : g,
         ),
       }));
     },
@@ -305,7 +293,6 @@ export const useGraphStore = create<GraphStore>((set, get) => {
       }));
     },
 
-    // Selection
     selectVertex: (id, addToSelection = false) => {
       set((state) => ({
         selectedVertexIds: addToSelection
@@ -332,12 +319,10 @@ export const useGraphStore = create<GraphStore>((set, get) => {
       set({ selectedVertexIds: [], selectedEdgeIds: [] });
     },
 
-    // Tool
     setTool: (tool) => {
       set({ tool, isCreatingEdge: false, edgeSourceId: null });
     },
 
-    // Edge creation
     startEdgeCreation: (sourceId) => {
       set({ isCreatingEdge: true, edgeSourceId: sourceId });
     },
@@ -346,7 +331,6 @@ export const useGraphStore = create<GraphStore>((set, get) => {
       set({ isCreatingEdge: false, edgeSourceId: null });
     },
 
-    // Compare mode
     setCompareMode: (enabled) => {
       set({ compareMode: enabled, compareGraphId: enabled ? null : null });
     },
@@ -355,7 +339,6 @@ export const useGraphStore = create<GraphStore>((set, get) => {
       set({ compareGraphId: id });
     },
 
-    // Auto-labeling
     autoLabelVertices: () => {
       set((state) => ({
         graphs: state.graphs.map((g) =>
@@ -388,7 +371,6 @@ export const useGraphStore = create<GraphStore>((set, get) => {
       }));
     },
 
-    // Layer management
     setGraphOpacity: (id, opacity) => {
       set((state) => ({
         graphs: state.graphs.map((g) => (g.id === id ? { ...g, opacity: Math.max(0, Math.min(1, opacity)) } : g)),
@@ -413,7 +395,6 @@ export const useGraphStore = create<GraphStore>((set, get) => {
       }));
     },
 
-    // Utilities
     getActiveGraph: () => {
       const state = get();
       return state.graphs.find((g) => g.id === state.activeGraphId) || null;

@@ -294,7 +294,7 @@ export default function GraphSimulator() {
                       const val = parseInt(e.target.value);
                       if (!isNaN(val)) setZoom(Math.max(0.1, Math.min(3, val / 100)));
                     }}
-                    className="w-14 h-7 text-xs text-center"
+                    className="w-14 h-7 text-xs text-center [&::-webkit-outer-spin-button]:hidden [&::-webkit-inner-spin-button]:hidden"
                     min={10}
                     max={300}
                   />

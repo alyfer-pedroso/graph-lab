@@ -1,15 +1,108 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { CheckCircle2, XCircle, Play, RotateCcw } from "lucide-react";
+import { useState, useMemo, useRef, useEffect } from "react";
+import { CheckCircle2, XCircle, Play, RotateCcw, StepForward, ChevronRight, Pause, SkipForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useGraphStore } from "@/lib/graph-store";
-import { analyzeGraph, bfs, dfs, dijkstra, calculateDegrees } from "@/lib/graph-algorithms";
+import { analyzeGraph, bfs, dfs, calculateDegrees } from "@/lib/graph-algorithms";
 import type { PathResult } from "@/lib/graph-types";
+
+interface DijkstraStep {
+  current: string;
+  distances: Map<string, number>;
+  previous: Map<string, string | null>;
+  visited: Set<string>;
+  unvisited: Set<string>;
+  description: string;
+}
+
+function runDijkstraSteps(graph: any, startId: string, endId: string): DijkstraStep[] {
+  const steps: DijkstraStep[] = [];
+  const distances = new Map<string, number>();
+  const previous = new Map<string, string | null>();
+  const visited = new Set<string>();
+  const unvisited = new Set<string>();
+
+  graph.vertices.forEach((v: any) => {
+    distances.set(v.id, Infinity);
+    previous.set(v.id, null);
+    unvisited.add(v.id);
+  });
+  distances.set(startId, 0);
+
+  steps.push({
+    current: startId,
+    distances: new Map(distances),
+    previous: new Map(previous),
+    visited: new Set(visited),
+    unvisited: new Set(unvisited),
+    description: `Iniciando em ${graph.vertices.find((v: any) => v.id === startId)?.label}. Distância inicial = 0, todas as outras = ∞`,
+  });
+
+  while (unvisited.size > 0) {
+    let current: string | null = null;
+    let minDistance = Infinity;
+
+    unvisited.forEach((v) => {
+      const d = distances.get(v) ?? Infinity;
+      if (d < minDistance) {
+        minDistance = d;
+        current = v;
+      }
+    });
+
+    if (current === null || minDistance === Infinity) break;
+
+    unvisited.delete(current);
+    visited.add(current);
+
+    const currentLabel = graph.vertices.find((v: any) => v.id === current)?.label ?? current;
+    const currentDist = distances.get(current) ?? Infinity;
+
+    const neighbors: string[] = [];
+    graph.edges.forEach((e: any) => {
+      if (e.source === current) neighbors.push(e.target);
+      if (!graph.directed && e.target === current) neighbors.push(e.source);
+    });
+
+    const relaxed: string[] = [];
+    neighbors.forEach((neighbor) => {
+      if (!unvisited.has(neighbor)) return;
+      const edge = graph.edges.find(
+        (e: any) => (e.source === current && e.target === neighbor) || (!graph.directed && e.target === current && e.source === neighbor),
+      );
+      const weight = edge?.weight ?? 1;
+      const alt = currentDist + weight;
+      if (alt < (distances.get(neighbor) ?? Infinity)) {
+        distances.set(neighbor, alt);
+        previous.set(neighbor, current);
+        relaxed.push(neighbor);
+      }
+    });
+
+    const relaxedLabels = relaxed.map((id) => graph.vertices.find((v: any) => v.id === id)?.label ?? id).join(", ");
+
+    steps.push({
+      current,
+      distances: new Map(distances),
+      previous: new Map(previous),
+      visited: new Set(visited),
+      unvisited: new Set(unvisited),
+      description:
+        relaxed.length > 0
+          ? `Visitando ${currentLabel} (dist=${currentDist === Infinity ? "∞" : currentDist}). Atualizando: ${relaxedLabels}`
+          : `Visitando ${currentLabel} (dist=${currentDist === Infinity ? "∞" : currentDist}). Nenhuma atualização.`,
+    });
+
+    if (current === endId) break;
+  }
+
+  return steps;
+}
 
 export function AnalysisPanel() {
   const { graphs, activeGraphId } = useGraphStore();
@@ -20,6 +113,12 @@ export function AnalysisPanel() {
   const [searchResult, setSearchResult] = useState<string[] | null>(null);
   const [pathResult, setPathResult] = useState<PathResult | null>(null);
   const [searchType, setSearchType] = useState<"bfs" | "dfs">("bfs");
+  const [noPath, setNoPath] = useState(false);
+
+  const [dijkstraSteps, setDijkstraSteps] = useState<DijkstraStep[]>([]);
+  const [currentStep, setCurrentStep] = useState(-1);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const playInterval = useRef<NodeJS.Timeout | null>(null);
 
   const analysis = useMemo(() => {
     if (!activeGraph) return null;
@@ -31,8 +130,31 @@ export function AnalysisPanel() {
     return calculateDegrees(activeGraph);
   }, [activeGraph]);
 
+  useEffect(() => {
+    if (isPlaying) {
+      playInterval.current = setInterval(() => {
+        setCurrentStep((prev) => {
+          if (prev >= dijkstraSteps.length - 1) {
+            setIsPlaying(false);
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, 800);
+    } else {
+      if (playInterval.current) clearInterval(playInterval.current);
+    }
+    return () => {
+      if (playInterval.current) clearInterval(playInterval.current);
+    };
+  }, [isPlaying, dijkstraSteps.length]);
+
   if (!activeGraph) {
     return <div className="p-4 text-center text-muted-foreground text-sm">Nenhum grafo selecionado</div>;
+  }
+
+  function getVertexLabel(id: string): string {
+    return activeGraph?.vertices.find((v) => v.id === id)?.label || id;
   }
 
   function runSearch() {
@@ -41,26 +163,92 @@ export function AnalysisPanel() {
     setSearchResult(result);
   }
 
-  function runDijkstra() {
+  function initDijkstra() {
     if (!activeGraph || !startVertex || !endVertex) return;
-    const result = dijkstra(activeGraph, startVertex, endVertex);
-    setPathResult(result);
-  }
-
-  function resetResults() {
-    setSearchResult(null);
+    setNoPath(false);
     setPathResult(null);
+    const steps = runDijkstraSteps(activeGraph, startVertex, endVertex);
+    setDijkstraSteps(steps);
+    setCurrentStep(0);
+    setIsPlaying(false);
   }
 
-  function getVertexLabel(id: string): string {
-    return activeGraph?.vertices.find((v) => v.id === id)?.label || id;
+  function finishDijkstra() {
+    if (!activeGraph || !startVertex || !endVertex) return;
+    setNoPath(false);
+
+    const distances = new Map<string, number>();
+    const previous = new Map<string, string | null>();
+    const unvisited = new Set<string>();
+    activeGraph.vertices.forEach((v) => {
+      distances.set(v.id, Infinity);
+      previous.set(v.id, null);
+      unvisited.add(v.id);
+    });
+    distances.set(startVertex, 0);
+
+    while (unvisited.size > 0) {
+      let current: string | null = null;
+      let minDistance = Infinity;
+      unvisited.forEach((v) => {
+        const d = distances.get(v) ?? Infinity;
+        if (d < minDistance) {
+          minDistance = d;
+          current = v;
+        }
+      });
+      if (current === null || minDistance === Infinity) break;
+      unvisited.delete(current);
+      if (current === endVertex) break;
+
+      activeGraph.edges.forEach((e) => {
+        const neighbor = e.source === current ? e.target : !activeGraph.directed && e.target === current ? e.source : null;
+        if (!neighbor || !unvisited.has(neighbor)) return;
+        const weight = e.weight ?? 1;
+        const alt = (distances.get(current!) ?? 0) + weight;
+        if (alt < (distances.get(neighbor) ?? Infinity)) {
+          distances.set(neighbor, alt);
+          previous.set(neighbor, current);
+        }
+      });
+    }
+
+    const dist = distances.get(endVertex) ?? Infinity;
+    if (dist === Infinity) {
+      setNoPath(true);
+      setPathResult(null);
+      return;
+    }
+
+    const path: string[] = [];
+    let cur: string | null = endVertex;
+    while (cur !== null) {
+      path.unshift(cur);
+      cur = previous.get(cur) ?? null;
+    }
+    setPathResult({ path, distance: dist });
+    if (dijkstraSteps.length > 0) setCurrentStep(dijkstraSteps.length - 1);
   }
+
+  function resetDijkstra() {
+    setDijkstraSteps([]);
+    setCurrentStep(-1);
+    setPathResult(null);
+    setNoPath(false);
+    setIsPlaying(false);
+  }
+
+  const activeStep = currentStep >= 0 && currentStep < dijkstraSteps.length ? dijkstraSteps[currentStep] : null;
+
+  const finalPath = useMemo(() => {
+    if (!pathResult || !activeGraph) return [];
+    return pathResult.path;
+  }, [pathResult, activeGraph]);
 
   return (
-    <div className="p-4 space-y-6 overflow-auto max-h-[calc(100vh-200px)]">
+    <div className="p-4 space-y-6 overflow-auto max-h-[calc(100vh-150px)]">
       <div className="space-y-3">
         <h4 className="font-semibold text-sm">Propriedades do Grafo</h4>
-
         <div className="grid grid-cols-2 gap-2">
           <PropertyBadge label="Conexo" value={analysis?.isConnected} />
           <PropertyBadge label="Bipartido" value={analysis?.isBipartite} />
@@ -69,11 +257,10 @@ export function AnalysisPanel() {
           <PropertyBadge label="É Árvore" value={analysis?.isTree} />
           <PropertyBadge label="Completo" value={analysis?.isComplete} />
         </div>
-
         {analysis?.hasLoops && (
-          <div className="mt-2 p-2 bg-muted rounded-md">
+          <div className="p-2 bg-muted rounded-md">
             <p className="text-xs text-muted-foreground">
-              Loops (lacos): <span className="font-medium text-foreground">{analysis?.loopCount ?? 0}</span>
+              Loops: <span className="font-medium text-foreground">{analysis?.loopCount ?? 0}</span>
             </p>
           </div>
         )}
@@ -83,7 +270,6 @@ export function AnalysisPanel() {
 
       <div className="space-y-3">
         <h4 className="font-semibold text-sm">Graus dos Vértices</h4>
-
         {activeGraph.vertices.length === 0 ? (
           <p className="text-xs text-muted-foreground">Adicione vértices para ver os graus</p>
         ) : (
@@ -92,7 +278,6 @@ export function AnalysisPanel() {
               const degree = degrees?.degree.get(vertex.id) || 0;
               const inDeg = degrees?.inDegree?.get(vertex.id);
               const outDeg = degrees?.outDegree?.get(vertex.id);
-
               return (
                 <div key={vertex.id} className="flex items-center justify-between text-sm">
                   <span className="font-medium">{vertex.label}</span>
@@ -123,7 +308,6 @@ export function AnalysisPanel() {
 
       <div className="space-y-3">
         <h4 className="font-semibold text-sm">Busca (BFS/DFS)</h4>
-
         <div className="space-y-2">
           <div className="flex gap-2">
             <Select value={searchType} onValueChange={(v) => setSearchType(v as "bfs" | "dfs")}>
@@ -135,7 +319,6 @@ export function AnalysisPanel() {
                 <SelectItem value="dfs">DFS</SelectItem>
               </SelectContent>
             </Select>
-
             <Select value={startVertex} onValueChange={setStartVertex}>
               <SelectTrigger className="flex-1">
                 <SelectValue placeholder="Início" />
@@ -148,12 +331,10 @@ export function AnalysisPanel() {
                 ))}
               </SelectContent>
             </Select>
-
             <Button size="icon" onClick={runSearch} disabled={!startVertex}>
               <Play className="h-4 w-4" />
             </Button>
           </div>
-
           {searchResult && (
             <div className="p-2 bg-muted rounded-md">
               <p className="text-xs text-muted-foreground mb-1">Ordem de visita ({searchType.toUpperCase()}):</p>
@@ -166,67 +347,220 @@ export function AnalysisPanel() {
       <Separator />
 
       <div className="space-y-3">
-        <h4 className="font-semibold text-sm">Caminho Mínimo (Dijkstra)</h4>
+        <h4 className="font-semibold text-sm">Caminho Mínimo — Dijkstra</h4>
 
-        <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Origem</Label>
-              <Select value={startVertex} onValueChange={setStartVertex}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {activeGraph.vertices.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>
-                      {v.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs">Destino</Label>
-              <Select value={endVertex} onValueChange={setEndVertex}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {activeGraph.vertices.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>
-                      {v.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Origem</Label>
+            <Select
+              value={startVertex}
+              onValueChange={(v) => {
+                setStartVertex(v);
+                resetDijkstra();
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                {activeGraph.vertices.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>
+                    {v.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-
-          <div className="flex gap-2">
-            <Button className="flex-1" onClick={runDijkstra} disabled={!startVertex || !endVertex}>
-              <Play className="h-4 w-4 mr-2" />
-              Calcular
-            </Button>
-            <Button variant="outline" size="icon" onClick={resetResults}>
-              <RotateCcw className="h-4 w-4" />
-            </Button>
+          <div className="space-y-1">
+            <Label className="text-xs">Destino</Label>
+            <Select
+              value={endVertex}
+              onValueChange={(v) => {
+                setEndVertex(v);
+                resetDijkstra();
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                {activeGraph.vertices.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>
+                    {v.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-
-          {pathResult && (
-            <div className="p-2 bg-muted rounded-md">
-              <p className="text-xs text-muted-foreground mb-1">Caminho encontrado:</p>
-              <p className="text-sm font-mono">{pathResult.path.map(getVertexLabel).join(" → ")}</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Distância: <span className="font-medium">{pathResult.distance}</span>
-              </p>
-            </div>
-          )}
-
-          {pathResult === null && startVertex && endVertex && (
-            <p className="text-xs text-muted-foreground">Clique em Calcular para encontrar o caminho mínimo</p>
-          )}
         </div>
+
+        {startVertex && endVertex && startVertex !== endVertex && (
+          <div className="space-y-2">
+            {dijkstraSteps.length === 0 ? (
+              <div className="flex gap-2 flex-wrap">
+                <Button className="flex-1" onClick={initDijkstra} size="sm">
+                  <StepForward className="h-4 w-4 mr-2" />
+                  Simular passo a passo
+                </Button>
+                <Button variant="outline" className="flex-1" onClick={finishDijkstra} size="sm">
+                  <SkipForward className="h-4 w-4 mr-2" />
+                  Resultado direto
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+                    disabled={currentStep <= 0}
+                  >
+                    <ChevronRight className="h-3 w-3 rotate-180" />
+                  </Button>
+                  <Button variant="outline" size="sm" className="flex-1 h-7 text-xs" onClick={() => setIsPlaying(!isPlaying)}>
+                    {isPlaying ? (
+                      <>
+                        <Pause className="h-3 w-3 mr-1" />
+                        Pausar
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-3 w-3 mr-1" />
+                        Auto
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => setCurrentStep(Math.min(dijkstraSteps.length - 1, currentStep + 1))}
+                    disabled={currentStep >= dijkstraSteps.length - 1}
+                  >
+                    <ChevronRight className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => {
+                      setCurrentStep(dijkstraSteps.length - 1);
+                      setIsPlaying(false);
+                      finishDijkstra();
+                    }}
+                  >
+                    <SkipForward className="h-3 w-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={resetDijkstra}>
+                    <RotateCcw className="h-3 w-3" />
+                  </Button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    Passo {currentStep + 1} de {dijkstraSteps.length}
+                  </span>
+                  <div className="flex gap-0.5">
+                    {dijkstraSteps.map((_, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setCurrentStep(i)}
+                        className={`w-2 h-2 rounded-full transition-colors ${i === currentStep ? "bg-primary" : i < currentStep ? "bg-primary/40" : "bg-muted"}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {activeStep && (
+                  <div className="p-2 bg-muted/50 rounded-md border border-border">
+                    <p className="text-xs font-medium mb-1 text-primary">Nó atual: {getVertexLabel(activeStep.current)}</p>
+                    <p className="text-xs text-muted-foreground">{activeStep.description}</p>
+                  </div>
+                )}
+
+                {activeStep && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Tabela de distâncias:</p>
+                    <div className="rounded-md border border-border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-muted/50">
+                            <th className="text-left px-2 py-1 font-medium">Vértice</th>
+                            <th className="text-center px-2 py-1 font-medium">Dist.</th>
+                            <th className="text-center px-2 py-1 font-medium">Anterior</th>
+                            <th className="text-center px-2 py-1 font-medium">Estado</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeGraph.vertices.map((v) => {
+                            const dist = activeStep.distances.get(v.id) ?? Infinity;
+                            const prev = activeStep.previous.get(v.id);
+                            const isCurrent = v.id === activeStep.current;
+                            const isVisited = activeStep.visited.has(v.id);
+                            const isInPath = finalPath.includes(v.id);
+                            return (
+                              <tr
+                                key={v.id}
+                                className={`border-t border-border ${isCurrent ? "bg-primary/10" : isInPath && pathResult ? "bg-green-500/10" : ""}`}
+                              >
+                                <td className={`px-2 py-1 font-medium ${isCurrent ? "text-primary" : ""}`}>{v.label}</td>
+                                <td className="px-2 py-1 text-center font-mono">{dist === Infinity ? "∞" : dist}</td>
+                                <td className="px-2 py-1 text-center">{prev ? getVertexLabel(prev) : v.id === startVertex ? "—" : "∞"}</td>
+                                <td className="px-2 py-1 text-center">
+                                  {isCurrent ? (
+                                    <span className="text-primary text-xs">atual</span>
+                                  ) : isVisited ? (
+                                    <span className="text-green-500 text-xs">✓</span>
+                                  ) : (
+                                    <span className="text-muted-foreground text-xs">fila</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {noPath && (
+          <div className="p-2 bg-destructive/10 border border-destructive/30 rounded-md">
+            <p className="text-xs text-destructive font-medium">
+              Nenhum caminho encontrado entre {getVertexLabel(startVertex)} e {getVertexLabel(endVertex)}.
+            </p>
+          </div>
+        )}
+
+        {pathResult && (
+          <div className="p-2 bg-green-500/10 border border-green-500/30 rounded-md space-y-1">
+            <p className="text-xs font-medium text-green-600 dark:text-green-400">Caminho mínimo encontrado:</p>
+            <p className="text-sm font-mono">{pathResult.path.map(getVertexLabel).join(" → ")}</p>
+            <div className="flex gap-3 text-xs text-muted-foreground">
+              <span>
+                Distância total: <span className="font-medium text-foreground">{pathResult.distance}</span>
+              </span>
+              <span>
+                Nós: <span className="font-medium text-foreground">{pathResult.path.length}</span>
+              </span>
+              <span>
+                Arestas: <span className="font-medium text-foreground">{pathResult.path.length - 1}</span>
+              </span>
+            </div>
+          </div>
+        )}
+
+        {!activeGraph.weighted && activeGraph.vertices.length > 0 && (
+          <p className="text-xs text-muted-foreground bg-muted/50 p-2 rounded-md">
+            Grafo não ponderado: peso 1 por aresta. Ative "Ponderado" nas propriedades para usar pesos customizados.
+          </p>
+        )}
       </div>
     </div>
   );

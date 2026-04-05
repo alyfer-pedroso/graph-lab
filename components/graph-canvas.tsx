@@ -461,7 +461,6 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     return Math.sqrt((px - (x1 + t * dx)) ** 2 + (py - (y1 + t * dy)) ** 2);
   }
 
-  /** Get all vertex ids within a screen-space rectangle */
   function getVerticesInRect(x1: number, y1: number, x2: number, y2: number): string[] {
     const currentPan = panRef.current;
     const currentZoom = zoomRef.current;
