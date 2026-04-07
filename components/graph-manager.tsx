@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Plus, Copy, Trash2, Settings, GitBranch, Eye, EyeOff, Move, Upload, Download as DownloadIcon } from "lucide-react";
+import { Plus, Copy, Trash2, Settings, GitBranch, Eye, EyeOff, Move, Upload, Download as DownloadIcon, RotateCcw, PackageOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,7 @@ export function GraphManager() {
     setGraphVisible,
     setGraphOffset,
     importGraph,
+    resetAllGraphs,
   } = useGraphStore();
 
   const [newGraphName, setNewGraphName] = useState("");
@@ -34,7 +35,9 @@ export function GraphManager() {
   const [newGraphWeighted, setNewGraphWeighted] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const importAllInputRef = useRef<HTMLInputElement>(null);
 
   function handleCreateGraph() {
     if (newGraphName.trim()) {
@@ -73,9 +76,47 @@ export function GraphManager() {
     URL.revokeObjectURL(url);
   }
 
+  function exportAllGraphs() {
+    const exportData = {
+      version: "1.0",
+      exportedAt: new Date().toISOString(),
+      graphs: graphs.map((graph) => ({
+        id: graph.id,
+        name: graph.name,
+        directed: graph.directed,
+        weighted: graph.weighted,
+        opacity: graph.opacity,
+        visible: graph.visible,
+        offsetX: graph.offsetX,
+        offsetY: graph.offsetY,
+        defaultVertexColor: graph.defaultVertexColor,
+        vertices: graph.vertices.map((v) => ({ id: v.id, label: v.label, x: v.x, y: v.y, color: v.color })),
+        edges: graph.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, label: e.label, weight: e.weight, directed: e.directed })),
+      })),
+    };
+    const json = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `graphlab_todos_grafos_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleReset() {
+    resetAllGraphs();
+    setResetDialogOpen(false);
+  }
+
   function handleImportClick() {
     setImportError(null);
     importInputRef.current?.click();
+  }
+
+  function handleImportAllClick() {
+    setImportError(null);
+    importAllInputRef.current?.click();
   }
 
   function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -122,15 +163,110 @@ export function GraphManager() {
     e.target.value = "";
   }
 
+  function handleImportAllFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const raw = ev.target?.result as string;
+        const parsed = JSON.parse(raw);
+
+        if (parsed.version && parsed.graphs && Array.isArray(parsed.graphs)) {
+          let importedCount = 0;
+          for (const graphData of parsed.graphs) {
+            try {
+              importGraph({
+                name: graphData.name || `Grafo importado ${importedCount + 1}`,
+                directed: graphData.directed ?? false,
+                weighted: graphData.weighted ?? false,
+                opacity: graphData.opacity ?? 1,
+                visible: graphData.visible ?? true,
+                offsetX: graphData.offsetX ?? 0,
+                offsetY: graphData.offsetY ?? 0,
+                defaultVertexColor: graphData.defaultVertexColor,
+                vertices: (graphData.vertices || []).map((v: any) => ({ id: v.id, label: v.label, x: v.x, y: v.y, color: v.color })),
+                edges: (graphData.edges || []).map((e: any) => ({
+                  id: e.id,
+                  source: e.source,
+                  target: e.target,
+                  label: e.label,
+                  weight: e.weight,
+                  directed: e.directed ?? graphData.directed ?? false,
+                })),
+              });
+              importedCount++;
+            } catch {}
+          }
+          setImportError(null);
+          if (importedCount === 0) {
+            setImportError("Nenhum grafo válido encontrado no arquivo.");
+          }
+        } else {
+          throw new Error("Formato inválido. Use um arquivo de exportação múltipla do GraphLab.");
+        }
+      } catch (err: any) {
+        setImportError(err.message || "Erro ao importar o arquivo.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-3 border-b border-border">
-        <h3 className="font-semibold text-sm">Camadas / Grafos</h3>
-        <div className="flex items-center gap-1">
+        <h3 className="font-semibold text-sm">Grafos</h3>
+        <div className="flex items-center gap-1 pr-8 md:pr-0">
+          <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="Resetar tudo">
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Resetar o sistema</DialogTitle>
+                <DialogDescription>
+                  Isso irá apagar <strong>todos os grafos</strong> e começar do zero. Esta ação não pode ser desfeita.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setResetDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button variant="destructive" onClick={handleReset}>
+                  Resetar tudo
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <input ref={importInputRef} type="file" accept=".json,.graphlab.json" className="hidden" onChange={handleImportFile} />
-          <Button variant="ghost" size="icon" className="h-7 w-7" title="Importar grafo (.json)" onClick={handleImportClick}>
-            <Upload className="h-4 w-4" />
-          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7" title="Exportar/Importar todos os grafos">
+                <PackageOpen className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={exportAllGraphs} title="Exportar todos os grafos">
+                <DownloadIcon className="h-4 w-4 mr-2" />
+                Exportar todos os grafos
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleImportClick} title="Importar arquivo com um único grafo (.json)">
+                <Upload className="h-4 w-4 mr-2" />
+                Importar arquivo com um único grafo
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleImportAllClick} title="Importar arquivo com múltiplos grafos (.json)">
+                <Upload className="h-4 w-4 mr-2" />
+                Importar arquivo com múltiplos grafos
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <input ref={importAllInputRef} type="file" accept=".json" className="hidden" onChange={handleImportAllFile} />
+
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7">
@@ -281,6 +417,12 @@ export function GraphManager() {
           ))}
         </div>
       </ScrollArea>
+
+      <div className="px-3 py-2 border-t border-border">
+        <p className="text-xs text-muted-foreground text-center">
+          {graphs.length} grafo{graphs.length !== 1 ? "s" : ""} · Auto-salvo no navegador
+        </p>
+      </div>
     </div>
   );
 }
