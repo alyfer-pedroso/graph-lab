@@ -20,7 +20,6 @@ import {
   PanelRightOpen,
   Download,
   Menu,
-  X,
   Layers,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -46,7 +45,7 @@ export default function GraphSimulator() {
   const canvasRef = useRef<GraphCanvasRef>(null);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("properties");
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -82,7 +81,7 @@ export default function GraphSimulator() {
   };
 
   const RightPanelContent = () => (
-    <Tabs defaultValue="properties" className="flex flex-col h-full">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
       <TabsList className="w-full rounded-none border-b border-border bg-transparent p-0 h-auto shrink-0">
         {[
           { value: "properties", icon: Settings2, label: "Propriedades" },

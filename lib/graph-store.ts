@@ -127,7 +127,6 @@ export const useGraphStore = create<GraphStore>()(
           offsetY: graphData.offsetY ?? 0,
           defaultVertexColor: graphData.defaultVertexColor || getGraphDefaultColor(graphIndex),
         };
-        // Avoid ID collision — generate a fresh ID
         const safeId = currentGraphs.some((g) => g.id === id) ? generateId() : id;
         newGraph.id = safeId;
         set((state) => ({

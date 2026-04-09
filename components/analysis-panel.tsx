@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { CheckCircle2, XCircle, Play, RotateCcw, StepForward, ChevronRight, Pause, SkipForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useGraphStore } from "@/lib/graph-store";
+import { useDijkstraStore } from "@/lib/dijkstra-store";
 import { analyzeGraph, bfs, dfs, calculateDegrees } from "@/lib/graph-algorithms";
 import type { PathResult } from "@/lib/graph-types";
 
@@ -18,6 +19,14 @@ interface DijkstraStep {
   visited: Set<string>;
   unvisited: Set<string>;
   description: string;
+  relaxedEdges: string[];
+}
+
+function findEdgeId(graph: any, source: string, target: string): string | null {
+  const edge = graph.edges.find(
+    (e: any) => (e.source === source && e.target === target) || (!graph.directed && e.source === target && e.target === source),
+  );
+  return edge?.id ?? null;
 }
 
 function runDijkstraSteps(graph: any, startId: string, endId: string): DijkstraStep[] {
@@ -40,6 +49,7 @@ function runDijkstraSteps(graph: any, startId: string, endId: string): DijkstraS
     previous: new Map(previous),
     visited: new Set(visited),
     unvisited: new Set(unvisited),
+    relaxedEdges: [],
     description: `Iniciando em ${graph.vertices.find((v: any) => v.id === startId)?.label}. Distância inicial = 0, todas as outras = ∞`,
   });
 
@@ -84,6 +94,8 @@ function runDijkstraSteps(graph: any, startId: string, endId: string): DijkstraS
       }
     });
 
+    const neighborEdgeIds: string[] = neighbors.map((n) => findEdgeId(graph, current!, n)).filter(Boolean) as string[];
+
     const relaxedLabels = relaxed.map((id) => graph.vertices.find((v: any) => v.id === id)?.label ?? id).join(", ");
 
     steps.push({
@@ -92,6 +104,7 @@ function runDijkstraSteps(graph: any, startId: string, endId: string): DijkstraS
       previous: new Map(previous),
       visited: new Set(visited),
       unvisited: new Set(unvisited),
+      relaxedEdges: neighborEdgeIds,
       description:
         relaxed.length > 0
           ? `Visitando ${currentLabel} (dist=${currentDist === Infinity ? "∞" : currentDist}). Atualizando: ${relaxedLabels}`
@@ -104,7 +117,18 @@ function runDijkstraSteps(graph: any, startId: string, endId: string): DijkstraS
   return steps;
 }
 
+function buildPathEdgeIds(graph: any, path: string[]): string[] {
+  const edgeIds: string[] = [];
+  for (let i = 0; i < path.length - 1; i++) {
+    const eid = findEdgeId(graph, path[i], path[i + 1]);
+    if (eid) edgeIds.push(eid);
+  }
+  return edgeIds;
+}
+
 export function AnalysisPanel() {
+  const setDijkstraHighlight = useDijkstraStore.getState().setDijkstraHighlight;
+
   const { graphs, activeGraphId } = useGraphStore();
   const activeGraph = graphs.find((g) => g.id === activeGraphId);
 
@@ -120,6 +144,24 @@ export function AnalysisPanel() {
   const [isPlaying, setIsPlaying] = useState(false);
   const playInterval = useRef<NodeJS.Timeout | null>(null);
 
+  const activeGraphRef = useRef(activeGraph);
+  const startVertexRef = useRef(startVertex);
+  const endVertexRef = useRef(endVertex);
+  const pathResultRef = useRef(pathResult);
+
+  useEffect(() => {
+    activeGraphRef.current = activeGraph;
+  }, [activeGraph]);
+  useEffect(() => {
+    startVertexRef.current = startVertex;
+  }, [startVertex]);
+  useEffect(() => {
+    endVertexRef.current = endVertex;
+  }, [endVertex]);
+  useEffect(() => {
+    pathResultRef.current = pathResult;
+  }, [pathResult]);
+
   const analysis = useMemo(() => {
     if (!activeGraph) return null;
     return analyzeGraph(activeGraph);
@@ -129,6 +171,86 @@ export function AnalysisPanel() {
     if (!activeGraph) return null;
     return calculateDegrees(activeGraph);
   }, [activeGraph]);
+
+  useEffect(() => {
+    const graph = activeGraphRef.current;
+    if (!graph || dijkstraSteps.length === 0 || currentStep < 0) {
+      setDijkstraHighlight(null);
+      return;
+    }
+
+    const step = dijkstraSteps[currentStep];
+    if (!step) {
+      setDijkstraHighlight(null);
+      return;
+    }
+
+    const pr = pathResultRef.current;
+    const sv = startVertexRef.current;
+    const ev = endVertexRef.current;
+
+    let pathVertices: Set<string> = new Set();
+    let pathEdges: Set<string> = new Set();
+    const isFinished = pr !== null;
+
+    if (isFinished && pr) {
+      pathVertices = new Set(pr.path);
+      pathEdges = new Set(buildPathEdgeIds(graph, pr.path));
+    }
+
+    setDijkstraHighlight({
+      currentVertex: step.current,
+      visitedVertices: new Set(step.visited),
+      activeEdges: new Set(step.relaxedEdges),
+      pathVertices,
+      pathEdges,
+      targetVertex: ev,
+      startVertex: sv,
+      isFinished,
+    });
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, dijkstraSteps, setDijkstraHighlight]);
+
+  useEffect(() => {
+    const graph = activeGraphRef.current;
+    if (!graph || dijkstraSteps.length === 0 || currentStep < 0) return;
+
+    const step = dijkstraSteps[currentStep];
+    if (!step) return;
+
+    const pr = pathResult;
+    const sv = startVertexRef.current;
+    const ev = endVertexRef.current;
+
+    let pathVertices: Set<string> = new Set();
+    let pathEdges: Set<string> = new Set();
+    const isFinished = pr !== null;
+
+    if (isFinished && pr) {
+      pathVertices = new Set(pr.path);
+      pathEdges = new Set(buildPathEdgeIds(graph, pr.path));
+    }
+
+    setDijkstraHighlight({
+      currentVertex: step.current,
+      visitedVertices: new Set(step.visited),
+      activeEdges: new Set(step.relaxedEdges),
+      pathVertices,
+      pathEdges,
+      targetVertex: ev,
+      startVertex: sv,
+      isFinished,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathResult]);
+
+  useEffect(() => {
+    return () => {
+      setDijkstraHighlight(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (isPlaying) {
@@ -173,9 +295,8 @@ export function AnalysisPanel() {
     setIsPlaying(false);
   }
 
-  function finishDijkstra() {
-    if (!activeGraph || !startVertex || !endVertex) return;
-    setNoPath(false);
+  function computeFinalPath(): PathResult | null {
+    if (!activeGraph || !startVertex || !endVertex) return null;
 
     const distances = new Map<string, number>();
     const previous = new Map<string, string | null>();
@@ -214,11 +335,7 @@ export function AnalysisPanel() {
     }
 
     const dist = distances.get(endVertex) ?? Infinity;
-    if (dist === Infinity) {
-      setNoPath(true);
-      setPathResult(null);
-      return;
-    }
+    if (dist === Infinity) return null;
 
     const path: string[] = [];
     let cur: string | null = endVertex;
@@ -226,7 +343,20 @@ export function AnalysisPanel() {
       path.unshift(cur);
       cur = previous.get(cur) ?? null;
     }
-    setPathResult({ path, distance: dist });
+    return { path, distance: dist };
+  }
+
+  function finishDijkstra() {
+    if (!activeGraph || !startVertex || !endVertex) return;
+    setNoPath(false);
+
+    const result = computeFinalPath();
+    if (!result) {
+      setNoPath(true);
+      setPathResult(null);
+      return;
+    }
+    setPathResult(result);
     if (dijkstraSteps.length > 0) setCurrentStep(dijkstraSteps.length - 1);
   }
 
@@ -236,6 +366,7 @@ export function AnalysisPanel() {
     setPathResult(null);
     setNoPath(false);
     setIsPlaying(false);
+    setDijkstraHighlight(null);
   }
 
   const activeStep = currentStep >= 0 && currentStep < dijkstraSteps.length ? dijkstraSteps[currentStep] : null;
@@ -349,6 +480,19 @@ export function AnalysisPanel() {
       <div className="space-y-3">
         <h4 className="font-semibold text-sm">Caminho Mínimo — Dijkstra</h4>
 
+        {dijkstraSteps.length > 0 && (
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-3 h-3 rounded-full bg-green-500" />
+              Atual / Caminho
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-3 h-3 rounded-full bg-blue-500" />
+              Visitado
+            </span>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
             <Label className="text-xs">Origem</Label>
@@ -402,7 +546,24 @@ export function AnalysisPanel() {
                   <StepForward className="h-4 w-4 mr-2" />
                   Simular passo a passo
                 </Button>
-                <Button variant="outline" className="flex-1" onClick={finishDijkstra} size="sm">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    setNoPath(false);
+                    const result = computeFinalPath();
+                    if (!result) {
+                      setNoPath(true);
+                      setPathResult(null);
+                    } else {
+                      setPathResult(result);
+                      const steps = runDijkstraSteps(activeGraph, startVertex, endVertex);
+                      setDijkstraSteps(steps);
+                      setCurrentStep(steps.length - 1);
+                    }
+                  }}
+                  size="sm"
+                >
                   <SkipForward className="h-4 w-4 mr-2" />
                   Resultado direto
                 </Button>
