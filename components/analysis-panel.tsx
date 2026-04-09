@@ -29,7 +29,7 @@ function findEdgeId(graph: any, source: string, target: string): string | null {
   return edge?.id ?? null;
 }
 
-function runDijkstraSteps(graph: any, startId: string, endId: string): DijkstraStep[] {
+function runDijkstraSteps(graph: any, startId: string, endId: string | null): DijkstraStep[] {
   const steps: DijkstraStep[] = [];
   const distances = new Map<string, number>();
   const previous = new Map<string, string | null>();
@@ -111,7 +111,7 @@ function runDijkstraSteps(graph: any, startId: string, endId: string): DijkstraS
           : `Visitando ${currentLabel} (dist=${currentDist === Infinity ? "∞" : currentDist}). Nenhuma atualização.`,
     });
 
-    if (current === endId) break;
+    if (endId && current === endId) break;
   }
 
   return steps;
@@ -126,6 +126,19 @@ function buildPathEdgeIds(graph: any, path: string[]): string[] {
   return edgeIds;
 }
 
+function reconstructPath(previous: Map<string, string | null>, startId: string, endId: string, distances: Map<string, number>): PathResult | null {
+  const dist = distances.get(endId) ?? Infinity;
+  if (dist === Infinity) return null;
+  const path: string[] = [];
+  let cur: string | null = endId;
+  while (cur !== null) {
+    path.unshift(cur);
+    cur = previous.get(cur) ?? null;
+  }
+  if (path[0] !== startId) return null;
+  return { path, distance: dist };
+}
+
 export function AnalysisPanel() {
   const setDijkstraHighlight = useDijkstraStore.getState().setDijkstraHighlight;
 
@@ -134,8 +147,10 @@ export function AnalysisPanel() {
 
   const [startVertex, setStartVertex] = useState<string>("");
   const [endVertex, setEndVertex] = useState<string>("");
+  const [allDestinationsMode, setAllDestinationsMode] = useState(false);
   const [searchResult, setSearchResult] = useState<string[] | null>(null);
   const [pathResult, setPathResult] = useState<PathResult | null>(null);
+  const [allPathsResult, setAllPathsResult] = useState<{ vertexId: string; label: string; result: PathResult | null }[] | null>(null);
   const [searchType, setSearchType] = useState<"bfs" | "dfs">("bfs");
   const [noPath, setNoPath] = useState(false);
 
@@ -204,11 +219,10 @@ export function AnalysisPanel() {
       activeEdges: new Set(step.relaxedEdges),
       pathVertices,
       pathEdges,
-      targetVertex: ev,
+      targetVertex: ev || null,
       startVertex: sv,
       isFinished,
     });
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep, dijkstraSteps, setDijkstraHighlight]);
 
@@ -238,7 +252,7 @@ export function AnalysisPanel() {
       activeEdges: new Set(step.relaxedEdges),
       pathVertices,
       pathEdges,
-      targetVertex: ev,
+      targetVertex: ev || null,
       startVertex: sv,
       isFinished,
     });
@@ -286,17 +300,18 @@ export function AnalysisPanel() {
   }
 
   function initDijkstra() {
-    if (!activeGraph || !startVertex || !endVertex) return;
+    if (!activeGraph || !startVertex) return;
     setNoPath(false);
     setPathResult(null);
-    const steps = runDijkstraSteps(activeGraph, startVertex, endVertex);
+    setAllPathsResult(null);
+    const steps = runDijkstraSteps(activeGraph, startVertex, allDestinationsMode ? null : endVertex);
     setDijkstraSteps(steps);
     setCurrentStep(0);
     setIsPlaying(false);
   }
 
-  function computeFinalPath(): PathResult | null {
-    if (!activeGraph || !startVertex || !endVertex) return null;
+  function computeFinalDijkstra(): { distances: Map<string, number>; previous: Map<string, string | null> } | null {
+    if (!activeGraph || !startVertex) return null;
 
     const distances = new Map<string, number>();
     const previous = new Map<string, string | null>();
@@ -320,7 +335,7 @@ export function AnalysisPanel() {
       });
       if (current === null || minDistance === Infinity) break;
       unvisited.delete(current);
-      if (current === endVertex) break;
+      if (!allDestinationsMode && current === endVertex) break;
 
       activeGraph.edges.forEach((e) => {
         const neighbor = e.source === current ? e.target : !activeGraph.directed && e.target === current ? e.source : null;
@@ -334,36 +349,55 @@ export function AnalysisPanel() {
       });
     }
 
-    const dist = distances.get(endVertex) ?? Infinity;
-    if (dist === Infinity) return null;
+    return { distances, previous };
+  }
 
-    const path: string[] = [];
-    let cur: string | null = endVertex;
-    while (cur !== null) {
-      path.unshift(cur);
-      cur = previous.get(cur) ?? null;
-    }
-    return { path, distance: dist };
+  function computeFinalPath(): PathResult | null {
+    if (!activeGraph || !startVertex || !endVertex) return null;
+    const result = computeFinalDijkstra();
+    if (!result) return null;
+    return reconstructPath(result.previous, startVertex, endVertex, result.distances);
+  }
+
+  function computeAllPaths(): { vertexId: string; label: string; result: PathResult | null }[] {
+    if (!activeGraph || !startVertex) return [];
+    const result = computeFinalDijkstra();
+    if (!result) return [];
+    return activeGraph.vertices
+      .filter((v) => v.id !== startVertex)
+      .map((v) => ({
+        vertexId: v.id,
+        label: v.label,
+        result: reconstructPath(result.previous, startVertex, v.id, result.distances),
+      }));
   }
 
   function finishDijkstra() {
-    if (!activeGraph || !startVertex || !endVertex) return;
+    if (!activeGraph || !startVertex) return;
     setNoPath(false);
 
-    const result = computeFinalPath();
-    if (!result) {
-      setNoPath(true);
-      setPathResult(null);
-      return;
+    if (allDestinationsMode) {
+      const paths = computeAllPaths();
+      setAllPathsResult(paths);
+      if (dijkstraSteps.length > 0) setCurrentStep(dijkstraSteps.length - 1);
+    } else {
+      if (!endVertex) return;
+      const result = computeFinalPath();
+      if (!result) {
+        setNoPath(true);
+        setPathResult(null);
+        return;
+      }
+      setPathResult(result);
+      if (dijkstraSteps.length > 0) setCurrentStep(dijkstraSteps.length - 1);
     }
-    setPathResult(result);
-    if (dijkstraSteps.length > 0) setCurrentStep(dijkstraSteps.length - 1);
   }
 
   function resetDijkstra() {
     setDijkstraSteps([]);
     setCurrentStep(-1);
     setPathResult(null);
+    setAllPathsResult(null);
     setNoPath(false);
     setIsPlaying(false);
     setDijkstraHighlight(null);
@@ -375,6 +409,8 @@ export function AnalysisPanel() {
     if (!pathResult || !activeGraph) return [];
     return pathResult.path;
   }, [pathResult, activeGraph]);
+
+  const canStartDijkstra = allDestinationsMode ? !!startVertex : !!startVertex && !!endVertex && startVertex !== endVertex;
 
   return (
     <div className="p-4 space-y-6 overflow-auto max-h-[calc(100vh-150px)]">
@@ -480,6 +516,27 @@ export function AnalysisPanel() {
       <div className="space-y-3">
         <h4 className="font-semibold text-sm">Caminho Mínimo — Dijkstra</h4>
 
+        <div className="flex items-center gap-1 p-1 bg-muted rounded-md">
+          <button
+            onClick={() => {
+              setAllDestinationsMode(false);
+              resetDijkstra();
+            }}
+            className={`flex-1 text-xs py-1.5 rounded transition-colors ${!allDestinationsMode ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Origem → Destino
+          </button>
+          <button
+            onClick={() => {
+              setAllDestinationsMode(true);
+              resetDijkstra();
+            }}
+            className={`flex-1 text-xs py-1.5 rounded transition-colors ${allDestinationsMode ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Todos os destinos
+          </button>
+        </div>
+
         {dijkstraSteps.length > 0 && (
           <div className="flex flex-wrap gap-2 text-xs">
             <span className="flex items-center gap-1">
@@ -493,7 +550,7 @@ export function AnalysisPanel() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className={`grid gap-2 ${allDestinationsMode ? "grid-cols-1" : "grid-cols-2"}`}>
           <div className="space-y-1">
             <Label className="text-xs">Origem</Label>
             <Select
@@ -515,30 +572,39 @@ export function AnalysisPanel() {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Destino</Label>
-            <Select
-              value={endVertex}
-              onValueChange={(v) => {
-                setEndVertex(v);
-                resetDijkstra();
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione" />
-              </SelectTrigger>
-              <SelectContent>
-                {activeGraph.vertices.map((v) => (
-                  <SelectItem key={v.id} value={v.id}>
-                    {v.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {!allDestinationsMode && (
+            <div className="space-y-1">
+              <Label className="text-xs">Destino</Label>
+              <Select
+                value={endVertex}
+                onValueChange={(v) => {
+                  setEndVertex(v);
+                  resetDijkstra();
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione" />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeGraph.vertices.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      {v.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
 
-        {startVertex && endVertex && startVertex !== endVertex && (
+        {allDestinationsMode && startVertex && (
+          <p className="text-xs text-muted-foreground bg-muted/50 p-2 rounded-md">
+            Calculará o menor caminho de <span className="font-medium text-foreground">{getVertexLabel(startVertex)}</span> para todos os outros
+            vértices.
+          </p>
+        )}
+
+        {canStartDijkstra && (
           <div className="space-y-2">
             {dijkstraSteps.length === 0 ? (
               <div className="flex gap-2 flex-wrap">
@@ -551,15 +617,23 @@ export function AnalysisPanel() {
                   className="flex-1"
                   onClick={() => {
                     setNoPath(false);
-                    const result = computeFinalPath();
-                    if (!result) {
-                      setNoPath(true);
-                      setPathResult(null);
-                    } else {
-                      setPathResult(result);
-                      const steps = runDijkstraSteps(activeGraph, startVertex, endVertex);
+                    if (allDestinationsMode) {
+                      const paths = computeAllPaths();
+                      setAllPathsResult(paths);
+                      const steps = runDijkstraSteps(activeGraph, startVertex, null);
                       setDijkstraSteps(steps);
                       setCurrentStep(steps.length - 1);
+                    } else {
+                      const result = computeFinalPath();
+                      if (!result) {
+                        setNoPath(true);
+                        setPathResult(null);
+                      } else {
+                        setPathResult(result);
+                        const steps = runDijkstraSteps(activeGraph, startVertex, endVertex);
+                        setDijkstraSteps(steps);
+                        setCurrentStep(steps.length - 1);
+                      }
                     }
                   }}
                   size="sm"
@@ -691,7 +765,7 @@ export function AnalysisPanel() {
           </div>
         )}
 
-        {noPath && (
+        {noPath && !allDestinationsMode && (
           <div className="p-2 bg-destructive/10 border border-destructive/30 rounded-md">
             <p className="text-xs text-destructive font-medium">
               Nenhum caminho encontrado entre {getVertexLabel(startVertex)} e {getVertexLabel(endVertex)}.
@@ -699,13 +773,13 @@ export function AnalysisPanel() {
           </div>
         )}
 
-        {pathResult && (
+        {pathResult && !allDestinationsMode && (
           <div className="p-2 bg-green-500/10 border border-green-500/30 rounded-md space-y-1">
             <p className="text-xs font-medium text-green-600 dark:text-green-400">Caminho mínimo encontrado:</p>
             <p className="text-sm font-mono">{pathResult.path.map(getVertexLabel).join(" → ")}</p>
             <div className="flex gap-3 text-xs text-muted-foreground">
               <span>
-                Distância total: <span className="font-medium text-foreground">{pathResult.distance}</span>
+                Distância: <span className="font-medium text-foreground">{pathResult.distance}</span>
               </span>
               <span>
                 Nós: <span className="font-medium text-foreground">{pathResult.path.length}</span>
@@ -714,6 +788,45 @@ export function AnalysisPanel() {
                 Arestas: <span className="font-medium text-foreground">{pathResult.path.length - 1}</span>
               </span>
             </div>
+          </div>
+        )}
+
+        {allPathsResult && allDestinationsMode && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">
+              Caminhos mínimos a partir de <span className="text-foreground">{getVertexLabel(startVertex)}</span>:
+            </p>
+            <div className="rounded-md border border-border overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-muted/50">
+                    <th className="text-left px-2 py-1.5 font-medium">Destino</th>
+                    <th className="text-center px-2 py-1.5 font-medium">Dist.</th>
+                    <th className="text-left px-2 py-1.5 font-medium">Caminho</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allPathsResult.map(({ vertexId, label, result }) => (
+                    <tr key={vertexId} className="border-t border-border">
+                      <td className="px-2 py-1.5 font-medium">{label}</td>
+                      <td className="px-2 py-1.5 text-center font-mono">
+                        {result ? (
+                          <span className="text-green-600 dark:text-green-400">{result.distance}</span>
+                        ) : (
+                          <span className="text-destructive">∞</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 font-mono text-muted-foreground">
+                        {result ? result.path.map(getVertexLabel).join(" → ") : <span className="text-destructive text-xs">Inacessível</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {allPathsResult.filter((r) => r.result !== null).length} de {allPathsResult.length} vértices acessíveis
+            </p>
           </div>
         )}
 
