@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import { useGraphStore } from "@/lib/graph-store";
+import { useDijkstraStore } from "@/lib/dijkstra-store";
 import type { Vertex, Edge, Graph } from "@/lib/graph-types";
 
 interface GraphCanvasProps {
@@ -60,7 +61,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   const isMovingSelectionRef = useRef(false);
 
   const [isDragging, setIsDragging] = useState(false);
-  const [dragVertex, setDragVertex] = useState<string | null>(null);
+  const [_, setDragVertex] = useState<string | null>(null);
   const dragVertexRef = useRef<string | null>(null);
 
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -71,6 +72,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   const pinchStartDistRef = useRef<number | null>(null);
   const pinchStartZoomRef = useRef<number>(1);
   const touchActionRef = useRef<"none" | "pan" | "pinch">("none");
+
+  const animFrameRef = useRef<number | null>(null);
+  const animTimeRef = useRef<number>(0);
 
   useImperativeHandle(
     ref,
@@ -123,14 +127,20 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     cancelEdgeCreation,
   } = useGraphStore();
 
+  const { dijkstraHighlight } = useDijkstraStore();
+
   const selectedVertexIdsRef = useRef(selectedVertexIds);
   const selectedEdgeIdsRef = useRef(selectedEdgeIds);
+  const dijkstraHighlightRef = useRef(dijkstraHighlight);
   useEffect(() => {
     selectedVertexIdsRef.current = selectedVertexIds;
   }, [selectedVertexIds]);
   useEffect(() => {
     selectedEdgeIdsRef.current = selectedEdgeIds;
   }, [selectedEdgeIds]);
+  useEffect(() => {
+    dijkstraHighlightRef.current = dijkstraHighlight;
+  }, [dijkstraHighlight]);
 
   const targetGraphId = graphId || activeGraphId;
   const activeGraph = graphs.find((g) => g.id === targetGraphId);
@@ -153,6 +163,26 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     panRef.current = pan;
   }, [pan]);
 
+  useEffect(() => {
+    if (dijkstraHighlight) {
+      const animate = (time: number) => {
+        animTimeRef.current = time;
+        draw();
+        animFrameRef.current = requestAnimationFrame(animate);
+      };
+      animFrameRef.current = requestAnimationFrame(animate);
+      return () => {
+        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      };
+    } else {
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+    }
+    //eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dijkstraHighlight]);
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -160,6 +190,8 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     if (!ctx) return;
     const currentPan = panRef.current;
     const currentZoom = zoomRef.current;
+    const dh = dijkstraHighlightRef.current;
+    const t = animTimeRef.current;
 
     ctx.fillStyle = "#0a0a0a";
     ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
@@ -194,10 +226,17 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         if (!source || !target) return;
         const isActive = graph.id === activeGraphId;
         const isSelected = isActive && selectedEdgeIdsRef.current.includes(edge.id);
+
+        let dijkstraEdgeState: "none" | "active" | "path" = "none";
+        if (dh && isActive) {
+          if (dh.pathEdges.has(edge.id)) dijkstraEdgeState = "path";
+          else if (dh.activeEdges.has(edge.id)) dijkstraEdgeState = "active";
+        }
+
         if (edge.source === edge.target) {
-          drawLoop(ctx, source, edge, graph.directed, isSelected, isActive);
+          drawLoop(ctx, source, edge, graph.directed, isSelected, isActive, graph.weighted, dijkstraEdgeState, t);
         } else {
-          drawEdge(ctx, source, target, edge, graph.directed, isSelected, isActive);
+          drawEdge(ctx, source, target, edge, graph.directed, isSelected, isActive, graph.weighted, dijkstraEdgeState, t);
         }
       });
 
@@ -222,7 +261,21 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         const isActive = graph.id === activeGraphId;
         const isSelected = isActive && selectedVertexIdsRef.current.includes(vertex.id);
         const isEdgeSource = isActive && vertex.id === edgeSourceId;
-        drawVertex(ctx, vertex, isSelected, isEdgeSource, isActive);
+
+        let dijkstraVertexState: "none" | "current" | "visited" | "path" | "start" | "target" = "none";
+        if (dh && isActive) {
+          if (dh.pathVertices.has(vertex.id)) {
+            dijkstraVertexState = vertex.id === dh.targetVertex && dh.isFinished ? "target" : "path";
+          } else if (vertex.id === dh.currentVertex) {
+            dijkstraVertexState = "current";
+          } else if (dh.visitedVertices.has(vertex.id)) {
+            dijkstraVertexState = "visited";
+          } else if (vertex.id === dh.startVertex) {
+            dijkstraVertexState = "start";
+          }
+        }
+
+        drawVertex(ctx, vertex, isSelected, isEdgeSource, isActive, dijkstraVertexState, t);
       });
 
       ctx.restore();
@@ -247,19 +300,66 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   }, [graphsToRender, activeGraph, canvasSize, isCreatingEdge, edgeSourceId, activeGraphId]);
 
   useEffect(() => {
-    draw();
-  }, [draw, pan, zoom, selectionBox, mousePos, selectedVertexIds, selectedEdgeIds]);
+    if (!dijkstraHighlight) {
+      draw();
+    }
+  }, [draw, pan, zoom, selectionBox, mousePos, selectedVertexIds, selectedEdgeIds, dijkstraHighlight]);
 
-  function drawVertex(ctx: CanvasRenderingContext2D, vertex: Vertex, isSelected: boolean, isEdgeSource: boolean, isActive: boolean) {
+  function drawVertex(
+    ctx: CanvasRenderingContext2D,
+    vertex: Vertex,
+    isSelected: boolean,
+    isEdgeSource: boolean,
+    isActive: boolean,
+    dijkstraState: "none" | "current" | "visited" | "path" | "start" | "target",
+    time: number,
+  ) {
     const radius = 24;
-    if (isSelected || isEdgeSource) {
+    const pulse = Math.sin(time / 300) * 0.5 + 0.5;
+
+    ctx.shadowBlur = 0;
+
+    if (dijkstraState === "current") {
+      ctx.shadowBlur = 20 + pulse * 20;
+      ctx.shadowColor = "#22c55e";
+    } else if (dijkstraState === "start") {
+      ctx.shadowBlur = 15 + pulse * 10;
+      ctx.shadowColor = "#22c55e";
+    } else if (dijkstraState === "target") {
+      ctx.shadowBlur = 20 + pulse * 20;
+      ctx.shadowColor = "#22c55e";
+    } else if (dijkstraState === "path") {
+      ctx.shadowBlur = 15 + pulse * 10;
+      ctx.shadowColor = "#22c55e";
+    } else if (dijkstraState === "visited") {
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = "#3b82f6";
+    } else if (isSelected || isEdgeSource) {
       ctx.shadowBlur = 20;
       ctx.shadowColor = isEdgeSource ? "#22c55e" : "#3b82f6";
     }
+
     ctx.beginPath();
     ctx.arc(vertex.x, vertex.y, radius, 0, Math.PI * 2);
+
     const gradient = ctx.createRadialGradient(vertex.x - 5, vertex.y - 5, 0, vertex.x, vertex.y, radius);
-    if (isSelected) {
+
+    if (dijkstraState === "current") {
+      gradient.addColorStop(0, "#4ade80");
+      gradient.addColorStop(1, "#15803d");
+    } else if (dijkstraState === "start") {
+      gradient.addColorStop(0, "#4ade80");
+      gradient.addColorStop(1, "#16a34a");
+    } else if (dijkstraState === "target") {
+      gradient.addColorStop(0, "#4ade80");
+      gradient.addColorStop(1, "#15803d");
+    } else if (dijkstraState === "path") {
+      gradient.addColorStop(0, "#34d399");
+      gradient.addColorStop(1, "#059669");
+    } else if (dijkstraState === "visited") {
+      gradient.addColorStop(0, "#60a5fa");
+      gradient.addColorStop(1, "#1d4ed8");
+    } else if (isSelected) {
       gradient.addColorStop(0, "#60a5fa");
       gradient.addColorStop(1, "#2563eb");
     } else if (isEdgeSource) {
@@ -272,12 +372,22 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       gradient.addColorStop(0, vertex.color || "#6366f1");
       gradient.addColorStop(1, vertex.color ? adjustColor(vertex.color, -30) : "#4f46e5");
     }
+
     ctx.fillStyle = gradient;
     ctx.fill();
-    ctx.strokeStyle = isSelected ? "#93c5fd" : isEdgeSource ? "#86efac" : isActive ? "#818cf8" : "#4b5563";
-    ctx.lineWidth = 2;
+
+    let strokeColor = isActive ? "#818cf8" : "#4b5563";
+    if (dijkstraState === "current" || dijkstraState === "start" || dijkstraState === "target") strokeColor = "#86efac";
+    else if (dijkstraState === "path") strokeColor = "#6ee7b7";
+    else if (dijkstraState === "visited") strokeColor = "#93c5fd";
+    else if (isSelected) strokeColor = "#93c5fd";
+    else if (isEdgeSource) strokeColor = "#86efac";
+
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = dijkstraState !== "none" ? 2.5 : 2;
     ctx.stroke();
     ctx.shadowBlur = 0;
+
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 14px Inter, system-ui, sans-serif";
     ctx.textAlign = "center";
@@ -293,6 +403,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     directed: boolean,
     isSelected: boolean,
     isActive: boolean,
+    isWeighted: boolean,
+    dijkstraState: "none" | "active" | "path",
+    time: number,
   ) {
     const dx = target.x - source.x;
     const dy = target.y - source.y;
@@ -302,13 +415,33 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     const startY = source.y + radius * Math.sin(angle);
     const endX = target.x - radius * Math.cos(angle);
     const endY = target.y - radius * Math.sin(angle);
-    const edgeColor = isSelected ? "#3b82f6" : isActive ? "#6b7280" : "#374151";
+
+    const pulse = Math.sin(time / 250) * 0.5 + 0.5;
+
+    let edgeColor = isSelected ? "#3b82f6" : isActive ? "#6b7280" : "#374151";
+    let lineWidth = isSelected ? 3 : 2;
+    ctx.shadowBlur = 0;
+
+    if (dijkstraState === "path") {
+      edgeColor = "#22c55e";
+      lineWidth = 3.5;
+      ctx.shadowBlur = 8 + pulse * 8;
+      ctx.shadowColor = "#22c55e";
+    } else if (dijkstraState === "active") {
+      edgeColor = "#3b82f6";
+      lineWidth = 3;
+      ctx.shadowBlur = 6 + pulse * 6;
+      ctx.shadowColor = "#3b82f6";
+    }
+
     ctx.beginPath();
     ctx.moveTo(startX, startY);
     ctx.lineTo(endX, endY);
     ctx.strokeStyle = edgeColor;
-    ctx.lineWidth = isSelected ? 3 : 2;
+    ctx.lineWidth = lineWidth;
     ctx.stroke();
+    ctx.shadowBlur = 0;
+
     if (directed) {
       const arrowLength = 12;
       const arrowAngle = Math.PI / 6;
@@ -321,33 +454,117 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       ctx.lineWidth = 2;
       ctx.stroke();
     }
+
     const midX = (startX + endX) / 2;
     const midY = (startY + endY) / 2;
-    const labelText = edge.weight !== undefined ? `${edge.label || ""} (${edge.weight})` : edge.label || "";
-    if (labelText) {
-      ctx.fillStyle = "#0a0a0a";
-      const textMetrics = ctx.measureText(labelText);
-      const padding = 4;
-      ctx.fillRect(midX - textMetrics.width / 2 - padding, midY - 8 - padding, textMetrics.width + padding * 2, 16 + padding * 2);
-      ctx.fillStyle = isSelected ? "#60a5fa" : "#9ca3af";
-      ctx.font = "12px Inter, system-ui, sans-serif";
+
+    const perpX = -Math.sin(angle);
+    const perpY = Math.cos(angle);
+    const labelOffsetDist = 14;
+    const labelX = midX + perpX * labelOffsetDist;
+    const labelY = midY + perpY * labelOffsetDist;
+
+    const weightText = isWeighted && edge.weight !== undefined ? String(edge.weight) : null;
+    const labelText = edge.label && edge.label !== "" ? edge.label : null;
+
+    if (weightText) {
+      ctx.font = "bold 12px Inter, system-ui, sans-serif";
+      const textW = ctx.measureText(weightText).width;
+      const padX = 6;
+      const padY = 3;
+      const bw = textW + padX * 2;
+      const bh = 18;
+
+      ctx.fillStyle =
+        dijkstraState === "path" ? "rgba(34,197,94,0.25)" : dijkstraState === "active" ? "rgba(59,130,246,0.25)" : "rgba(10,10,10,0.85)";
+      ctx.strokeStyle = dijkstraState === "path" ? "#22c55e" : dijkstraState === "active" ? "#3b82f6" : isSelected ? "#3b82f6" : "#4b5563";
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, labelX - bw / 2, labelY - bh / 2, bw, bh, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = dijkstraState === "path" ? "#4ade80" : dijkstraState === "active" ? "#93c5fd" : isSelected ? "#60a5fa" : "#e5e7eb";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(labelText, midX, midY);
+      ctx.fillText(weightText, labelX, labelY);
+    }
+
+    if (labelText) {
+      const labelY2 = weightText ? labelY + 18 : labelY;
+      ctx.font = "11px Inter, system-ui, sans-serif";
+      const textW2 = ctx.measureText(labelText).width;
+      const padX2 = 4;
+      const bw2 = textW2 + padX2 * 2;
+      const bh2 = 15;
+
+      ctx.fillStyle = "rgba(10,10,10,0.75)";
+      ctx.strokeStyle = "#374151";
+      ctx.lineWidth = 1;
+      roundRect(ctx, labelX - bw2 / 2, labelY2 - bh2 / 2, bw2, bh2, 3);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = isSelected ? "#60a5fa" : "#9ca3af";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(labelText, labelX, labelY2);
     }
   }
 
-  function drawLoop(ctx: CanvasRenderingContext2D, vertex: Vertex, edge: Edge, directed: boolean, isSelected: boolean, isActive: boolean) {
+  function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  function drawLoop(
+    ctx: CanvasRenderingContext2D,
+    vertex: Vertex,
+    edge: Edge,
+    directed: boolean,
+    isSelected: boolean,
+    isActive: boolean,
+    isWeighted: boolean,
+    dijkstraState: "none" | "active" | "path",
+    time: number,
+  ) {
     const vertexRadius = 24;
     const loopRadius = 20;
     const loopCenterX = vertex.x + vertexRadius * 0.7;
     const loopCenterY = vertex.y - vertexRadius * 0.7;
-    const edgeColor = isSelected ? "#3b82f6" : isActive ? "#6b7280" : "#374151";
+
+    const pulse = Math.sin(time / 250) * 0.5 + 0.5;
+    let edgeColor = isSelected ? "#3b82f6" : isActive ? "#6b7280" : "#374151";
+    let lineWidth = isSelected ? 3 : 2;
+    ctx.shadowBlur = 0;
+
+    if (dijkstraState === "path") {
+      edgeColor = "#22c55e";
+      lineWidth = 3.5;
+      ctx.shadowBlur = 8 + pulse * 8;
+      ctx.shadowColor = "#22c55e";
+    } else if (dijkstraState === "active") {
+      edgeColor = "#3b82f6";
+      lineWidth = 3;
+      ctx.shadowBlur = 6 + pulse * 6;
+      ctx.shadowColor = "#3b82f6";
+    }
+
     ctx.beginPath();
     ctx.arc(loopCenterX, loopCenterY, loopRadius, 0, Math.PI * 2);
     ctx.strokeStyle = edgeColor;
-    ctx.lineWidth = isSelected ? 3 : 2;
+    ctx.lineWidth = lineWidth;
     ctx.stroke();
+    ctx.shadowBlur = 0;
+
     if (directed) {
       const arrowLength = 10;
       const arrowAngle = Math.PI / 6;
@@ -363,19 +580,47 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       ctx.lineWidth = 2;
       ctx.stroke();
     }
-    const labelText = edge.weight !== undefined ? `${edge.label || ""} (${edge.weight})` : edge.label || "";
-    if (labelText) {
-      const labelX = loopCenterX + loopRadius + 5;
-      const labelY = loopCenterY;
-      ctx.fillStyle = "#0a0a0a";
-      const textMetrics = ctx.measureText(labelText);
-      const padding = 4;
-      ctx.fillRect(labelX - padding, labelY - 8 - padding, textMetrics.width + padding * 2, 16 + padding * 2);
-      ctx.fillStyle = isSelected ? "#60a5fa" : "#9ca3af";
-      ctx.font = "12px Inter, system-ui, sans-serif";
+
+    const weightText = isWeighted && edge.weight !== undefined ? String(edge.weight) : null;
+    const labelText = edge.label && edge.label !== "" ? edge.label : null;
+    const baseLabelX = loopCenterX + loopRadius + 8;
+    const baseLabelY = loopCenterY;
+
+    if (weightText) {
+      ctx.font = "bold 12px Inter, system-ui, sans-serif";
+      const textW = ctx.measureText(weightText).width;
+      const padX = 6;
+      const bw = textW + padX * 2;
+      const bh = 18;
+      ctx.fillStyle = "rgba(10,10,10,0.85)";
+      ctx.strokeStyle = isSelected ? "#3b82f6" : "#4b5563";
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, baseLabelX, baseLabelY - bh / 2, bw, bh, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = isSelected ? "#60a5fa" : "#e5e7eb";
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      ctx.fillText(labelText, labelX, labelY);
+      ctx.fillText(weightText, baseLabelX + padX, baseLabelY);
+    }
+
+    if (labelText) {
+      const labelY2 = weightText ? baseLabelY + 20 : baseLabelY;
+      ctx.font = "11px Inter, system-ui, sans-serif";
+      const textW2 = ctx.measureText(labelText).width;
+      const padX2 = 4;
+      const bw2 = textW2 + padX2 * 2;
+      const bh2 = 15;
+      ctx.fillStyle = "rgba(10,10,10,0.75)";
+      ctx.strokeStyle = "#374151";
+      ctx.lineWidth = 1;
+      roundRect(ctx, baseLabelX, labelY2 - bh2 / 2, bw2, bh2, 3);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = isSelected ? "#60a5fa" : "#9ca3af";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(labelText, baseLabelX + padX2, labelY2);
     }
   }
 
@@ -632,7 +877,6 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   function handleContextMenu(e: React.MouseEvent<HTMLCanvasElement>) {
     e.preventDefault();
     if (isCreatingEdge) cancelEdgeCreation();
-
     isRubberBanding.current = false;
     selectionBoxRef.current = null;
     setSelectionBox(null);
