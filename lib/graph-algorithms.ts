@@ -1,6 +1,5 @@
 import type { Graph, Vertex, Edge, AdjacencyMatrix, IncidenceMatrix, PathResult, IsomorphismResult, GraphAnalysis } from "./graph-types";
 
-// Generate adjacency matrix
 export function getAdjacencyMatrix(graph: Graph): { matrix: AdjacencyMatrix; labels: string[] } {
   const labels = graph.vertices.map((v) => v.label);
   const n = graph.vertices.length;
@@ -26,7 +25,6 @@ export function getAdjacencyMatrix(graph: Graph): { matrix: AdjacencyMatrix; lab
   return { matrix, labels };
 }
 
-// Generate incidence matrix
 export function getIncidenceMatrix(graph: Graph): { matrix: IncidenceMatrix; vertexLabels: string[]; edgeLabels: string[] } {
   const vertexLabels = graph.vertices.map((v) => v.label);
   const edgeLabels = graph.edges.map((e) => e.label || e.id);
@@ -44,8 +42,8 @@ export function getIncidenceMatrix(graph: Graph): { matrix: IncidenceMatrix; ver
     const targetIdx = vertexIndexMap.get(edge.target);
     if (sourceIdx !== undefined && targetIdx !== undefined) {
       if (graph.directed) {
-        matrix[sourceIdx][edgeIdx] = -1; // outgoing
-        matrix[targetIdx][edgeIdx] = 1; // incoming
+        matrix[sourceIdx][edgeIdx] = -1;
+        matrix[targetIdx][edgeIdx] = 1;
       } else {
         matrix[sourceIdx][edgeIdx] = 1;
         matrix[targetIdx][edgeIdx] = 1;
@@ -56,7 +54,6 @@ export function getIncidenceMatrix(graph: Graph): { matrix: IncidenceMatrix; ver
   return { matrix, vertexLabels, edgeLabels };
 }
 
-// Calculate vertex degrees
 export function calculateDegrees(graph: Graph): { degree: Map<string, number>; inDegree?: Map<string, number>; outDegree?: Map<string, number> } {
   const degree = new Map<string, number>();
   const inDegree = new Map<string, number>();
@@ -88,7 +85,6 @@ export function calculateDegrees(graph: Graph): { degree: Map<string, number>; i
   return { degree };
 }
 
-// BFS - Breadth First Search
 export function bfs(graph: Graph, startId: string): string[] {
   const visited = new Set<string>();
   const result: string[] = [];
@@ -109,7 +105,6 @@ export function bfs(graph: Graph, startId: string): string[] {
   return result;
 }
 
-// DFS - Depth First Search
 export function dfs(graph: Graph, startId: string): string[] {
   const visited = new Set<string>();
   const result: string[] = [];
@@ -127,7 +122,6 @@ export function dfs(graph: Graph, startId: string): string[] {
   return result;
 }
 
-// Get neighbors of a vertex
 export function getNeighbors(graph: Graph, vertexId: string): string[] {
   const neighbors: string[] = [];
   graph.edges.forEach((edge) => {
@@ -141,7 +135,6 @@ export function getNeighbors(graph: Graph, vertexId: string): string[] {
   return neighbors;
 }
 
-// Dijkstra's algorithm for shortest path
 export function dijkstra(graph: Graph, startId: string, endId: string): PathResult | null {
   const distances = new Map<string, number>();
   const previous = new Map<string, string | null>();
@@ -200,10 +193,8 @@ export function dijkstra(graph: Graph, startId: string, endId: string): PathResu
   return { path, distance: distances.get(endId)! };
 }
 
-// Check if graph is connected (undirected) or weakly connected (directed)
 export function isConnected(graph: Graph): boolean {
   if (graph.vertices.length === 0) return true;
-  // For connectivity check, treat edges as undirected
   const visited = new Set<string>();
   const queue: string[] = [graph.vertices[0].id];
   visited.add(graph.vertices[0].id);
@@ -225,7 +216,6 @@ export function isConnected(graph: Graph): boolean {
   return visited.size === graph.vertices.length;
 }
 
-// Check if graph has a cycle
 export function hasCycle(graph: Graph): boolean {
   const visited = new Set<string>();
   const recStack = new Set<string>();
@@ -256,7 +246,6 @@ export function hasCycle(graph: Graph): boolean {
   return false;
 }
 
-// Check if graph is bipartite
 export function isBipartite(graph: Graph): boolean {
   if (graph.vertices.length === 0) return true;
 
@@ -287,24 +276,21 @@ export function isBipartite(graph: Graph): boolean {
   return true;
 }
 
-// Check if graph is complete
 export function isComplete(graph: Graph): boolean {
   const n = graph.vertices.length;
   if (n === 0) return true;
   const expectedEdges = graph.directed ? n * (n - 1) : (n * (n - 1)) / 2;
-  // Count non-loop edges
+
   const nonLoopEdges = graph.edges.filter((e) => e.source !== e.target).length;
   return nonLoopEdges === expectedEdges;
 }
 
-// Check if graph is a tree
 export function isTree(graph: Graph): boolean {
   if (graph.vertices.length === 0) return true;
   const nonLoopEdges = graph.edges.filter((e) => e.source !== e.target).length;
   return isConnected(graph) && !hasCycle(graph) && nonLoopEdges === graph.vertices.length - 1;
 }
 
-// Analyze graph properties
 export function analyzeGraph(graph: Graph): GraphAnalysis {
   const degrees = calculateDegrees(graph);
   const loops = graph.edges.filter((e) => e.source === e.target);
@@ -325,7 +311,6 @@ export function analyzeGraph(graph: Graph): GraphAnalysis {
   };
 }
 
-// Build adjacency list from graph (ignoring offsets, just topology)
 function buildAdjList(graph: Graph): Map<string, Set<string>> {
   const adj = new Map<string, Set<string>>();
   for (const v of graph.vertices) adj.set(v.id, new Set());
@@ -336,20 +321,17 @@ function buildAdjList(graph: Graph): Map<string, Set<string>> {
   return adj;
 }
 
-// Get degree sequence with neighbor-degree signature for better isomorphism detection
 function getDegreeSignature(graph: Graph): number[] {
   const degrees = calculateDegrees(graph);
   return Array.from(degrees.degree.values()).sort((a, b) => a - b);
 }
 
-// Check isomorphism between two graphs - FIXED implementation
 export function checkIsomorphism(g1: Graph, g2: Graph): IsomorphismResult {
   const n1 = g1.vertices.length;
   const n2 = g2.vertices.length;
   const e1 = g1.edges.length;
   const e2 = g2.edges.length;
 
-  // Basic invariant checks
   if (n1 !== n2) {
     return { isIsomorphic: false, reason: `Quantidade de vértices diferente (${n1} vs ${n2})` };
   }
@@ -360,12 +342,10 @@ export function checkIsomorphism(g1: Graph, g2: Graph): IsomorphismResult {
     return { isIsomorphic: false, reason: "Tipos diferentes (direcionado/não-direcionado)" };
   }
 
-  // Empty graphs are isomorphic
   if (n1 === 0) {
     return { isIsomorphic: true, reason: "Ambos os grafos são vazios" };
   }
 
-  // Compare degree sequences
   const deg1 = getDegreeSignature(g1);
   const deg2 = getDegreeSignature(g2);
 
@@ -373,21 +353,18 @@ export function checkIsomorphism(g1: Graph, g2: Graph): IsomorphismResult {
     return { isIsomorphic: false, reason: `Sequência de graus diferente: [${deg1.join(",")}] vs [${deg2.join(",")}]` };
   }
 
-  // Check connectivity
   const conn1 = isConnected(g1);
   const conn2 = isConnected(g2);
   if (conn1 !== conn2) {
     return { isIsomorphic: false, reason: "Um grafo é conexo e o outro não" };
   }
 
-  // Check loop counts
   const loops1 = g1.edges.filter((e) => e.source === e.target).length;
   const loops2 = g2.edges.filter((e) => e.source === e.target).length;
   if (loops1 !== loops2) {
     return { isIsomorphic: false, reason: `Quantidade de laços diferente (${loops1} vs ${loops2})` };
   }
 
-  // For small graphs, try backtracking search for a valid mapping
   if (n1 <= 10) {
     const mapping = findIsomorphismMappingBacktrack(g1, g2);
     if (mapping) {
@@ -396,8 +373,6 @@ export function checkIsomorphism(g1: Graph, g2: Graph): IsomorphismResult {
     return { isIsomorphic: false, reason: "Nenhum mapeamento isomorfo válido encontrado (verificação exata)" };
   }
 
-  // For larger graphs, use heuristic based on multiple invariants
-  // Check bipartiteness
   const bip1 = isBipartite(g1);
   const bip2 = isBipartite(g2);
   if (bip1 !== bip2) {
@@ -407,14 +382,12 @@ export function checkIsomorphism(g1: Graph, g2: Graph): IsomorphismResult {
   return { isIsomorphic: true, reason: "Propriedades compatíveis (verificação heurística para grafos grandes)" };
 }
 
-// Backtracking isomorphism search
 function findIsomorphismMappingBacktrack(g1: Graph, g2: Graph): Map<string, string> | null {
   const adj1 = buildAdjList(g1);
   const adj2 = buildAdjList(g2);
   const deg1 = calculateDegrees(g1).degree;
   const deg2 = calculateDegrees(g2).degree;
 
-  // Group vertices by degree for pruning
   const byDeg2 = new Map<number, string[]>();
   for (const v of g2.vertices) {
     const d = deg2.get(v.id) || 0;
@@ -422,15 +395,13 @@ function findIsomorphismMappingBacktrack(g1: Graph, g2: Graph): Map<string, stri
     byDeg2.get(d)!.push(v.id);
   }
 
-  const mapping = new Map<string, string>(); // g1 vertex -> g2 vertex
+  const mapping = new Map<string, string>();
   const usedG2 = new Set<string>();
   const vertices1 = g1.vertices.map((v) => v.id);
 
   function isCompatible(v1: string, v2: string): boolean {
-    // Degree must match
     if ((deg1.get(v1) || 0) !== (deg2.get(v2) || 0)) return false;
 
-    // Check that already-mapped neighbors are consistent
     const neighbors1 = adj1.get(v1) || new Set();
     const neighbors2 = adj2.get(v2) || new Set();
 
@@ -469,7 +440,6 @@ function findIsomorphismMappingBacktrack(g1: Graph, g2: Graph): Map<string, stri
   return null;
 }
 
-// Generate label for vertex
 export function generateVertexLabel(existingLabels: string[]): string {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   for (let i = 0; i < 26; i++) {
@@ -484,7 +454,6 @@ export function generateVertexLabel(existingLabels: string[]): string {
   return `V${num}`;
 }
 
-// Generate edge label
 export function generateEdgeLabel(existingLabels: string[]): string {
   let num = 1;
   while (existingLabels.includes(`e${num}`)) {
