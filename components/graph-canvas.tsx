@@ -183,6 +183,43 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     //eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dijkstraHighlight]);
 
+  function hasReverseEdge(graph: Graph, sourceId: string, targetId: string): boolean {
+    if (!graph.directed) return false;
+    return graph.edges.some((e) => e.source === targetId && e.target === sourceId);
+  }
+
+  function getCurvedEdgePoints(
+    source: Vertex,
+    target: Vertex,
+    vertexRadius: number = 24,
+  ): { startX: number; startY: number; cpX: number; cpY: number; endX: number; endY: number } {
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+
+    const curvature = 0.2;
+    const cpOffset = dist * curvature;
+
+    const midX = (source.x + target.x) / 2;
+    const midY = (source.y + target.y) / 2;
+
+    const perpX = -Math.sin(angle) * cpOffset;
+    const perpY = Math.cos(angle) * cpOffset;
+    const cpX = midX + perpX;
+    const cpY = midY + perpY;
+
+    const startAngle = Math.atan2(cpY - source.y, cpX - source.x);
+    const startX = source.x + vertexRadius * Math.cos(startAngle);
+    const startY = source.y + vertexRadius * Math.sin(startAngle);
+
+    const endAngle = Math.atan2(cpY - target.y, cpX - target.x);
+    const endX = target.x + vertexRadius * Math.cos(endAngle);
+    const endY = target.y + vertexRadius * Math.sin(endAngle);
+
+    return { startX, startY, cpX, cpY, endX, endY };
+  }
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -236,7 +273,8 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         if (edge.source === edge.target) {
           drawLoop(ctx, source, edge, graph.directed, isSelected, isActive, graph.weighted, dijkstraEdgeState, t);
         } else {
-          drawEdge(ctx, source, target, edge, graph.directed, isSelected, isActive, graph.weighted, dijkstraEdgeState, t);
+          const isBidirectional = graph.directed && hasReverseEdge(graph, edge.source, edge.target);
+          drawEdge(ctx, source, target, edge, graph.directed, isSelected, isActive, graph.weighted, dijkstraEdgeState, t, isBidirectional);
         }
       });
 
@@ -406,16 +444,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     isWeighted: boolean,
     dijkstraState: "none" | "active" | "path",
     time: number,
+    isBidirectional: boolean = false,
   ) {
-    const dx = target.x - source.x;
-    const dy = target.y - source.y;
-    const angle = Math.atan2(dy, dx);
     const radius = 24;
-    const startX = source.x + radius * Math.cos(angle);
-    const startY = source.y + radius * Math.sin(angle);
-    const endX = target.x - radius * Math.cos(angle);
-    const endY = target.y - radius * Math.sin(angle);
-
     const pulse = Math.sin(time / 250) * 0.5 + 0.5;
 
     let edgeColor = isSelected ? "#3b82f6" : isActive ? "#6b7280" : "#374151";
@@ -434,36 +465,86 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       ctx.shadowColor = "#3b82f6";
     }
 
-    ctx.beginPath();
-    ctx.moveTo(startX, startY);
-    ctx.lineTo(endX, endY);
     ctx.strokeStyle = edgeColor;
     ctx.lineWidth = lineWidth;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
 
-    if (directed) {
-      const arrowLength = 12;
-      const arrowAngle = Math.PI / 6;
+    if (isBidirectional) {
+      const { startX, startY, cpX, cpY, endX, endY } = getCurvedEdgePoints(source, target, radius);
+
       ctx.beginPath();
-      ctx.moveTo(endX, endY);
-      ctx.lineTo(endX - arrowLength * Math.cos(angle - arrowAngle), endY - arrowLength * Math.sin(angle - arrowAngle));
-      ctx.moveTo(endX, endY);
-      ctx.lineTo(endX - arrowLength * Math.cos(angle + arrowAngle), endY - arrowLength * Math.sin(angle + arrowAngle));
-      ctx.strokeStyle = edgeColor;
-      ctx.lineWidth = 2;
+      ctx.moveTo(startX, startY);
+      ctx.quadraticCurveTo(cpX, cpY, endX, endY);
       ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      if (directed) {
+        const arrowLength = 12;
+        const arrowAngle = Math.PI / 6;
+        const arrowDir = Math.atan2(endY - cpY, endX - cpX);
+        ctx.beginPath();
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(endX - arrowLength * Math.cos(arrowDir - arrowAngle), endY - arrowLength * Math.sin(arrowDir - arrowAngle));
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(endX - arrowLength * Math.cos(arrowDir + arrowAngle), endY - arrowLength * Math.sin(arrowDir + arrowAngle));
+        ctx.strokeStyle = edgeColor;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      const labelX = 0.25 * startX + 0.5 * cpX + 0.25 * endX;
+      const labelY = 0.25 * startY + 0.5 * cpY + 0.25 * endY;
+
+      drawEdgeLabels(ctx, edge, isWeighted, isSelected, dijkstraState, labelX, labelY);
+    } else {
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const angle = Math.atan2(dy, dx);
+
+      const startX = source.x + radius * Math.cos(angle);
+      const startY = source.y + radius * Math.sin(angle);
+      const endX = target.x - radius * Math.cos(angle);
+      const endY = target.y - radius * Math.sin(angle);
+
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      if (directed) {
+        const arrowLength = 12;
+        const arrowAngle = Math.PI / 6;
+        ctx.beginPath();
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(endX - arrowLength * Math.cos(angle - arrowAngle), endY - arrowLength * Math.sin(angle - arrowAngle));
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(endX - arrowLength * Math.cos(angle + arrowAngle), endY - arrowLength * Math.sin(angle + arrowAngle));
+        ctx.strokeStyle = edgeColor;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      const midX = (startX + endX) / 2;
+      const midY = (startY + endY) / 2;
+      const perpX = -Math.sin(angle);
+      const perpY = Math.cos(angle);
+      const labelOffsetDist = 14;
+      const labelX = midX + perpX * labelOffsetDist;
+      const labelY = midY + perpY * labelOffsetDist;
+
+      drawEdgeLabels(ctx, edge, isWeighted, isSelected, dijkstraState, labelX, labelY);
     }
+  }
 
-    const midX = (startX + endX) / 2;
-    const midY = (startY + endY) / 2;
-
-    const perpX = -Math.sin(angle);
-    const perpY = Math.cos(angle);
-    const labelOffsetDist = 14;
-    const labelX = midX + perpX * labelOffsetDist;
-    const labelY = midY + perpY * labelOffsetDist;
-
+  function drawEdgeLabels(
+    ctx: CanvasRenderingContext2D,
+    edge: Edge,
+    isWeighted: boolean,
+    isSelected: boolean,
+    dijkstraState: "none" | "active" | "path",
+    labelX: number,
+    labelY: number,
+  ) {
     const weightText = isWeighted && edge.weight !== undefined ? String(edge.weight) : null;
     const labelText = edge.label && edge.label !== "" ? edge.label : null;
 
@@ -670,12 +751,40 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     return null;
   }
 
+  /**
+   * Distance from point (px,py) to a quadratic bezier curve P0->CP->P1.
+   * Sampled at N steps for hit-testing.
+   */
+  function distanceToQuadraticBezier(
+    px: number,
+    py: number,
+    p0x: number,
+    p0y: number,
+    cpx: number,
+    cpy: number,
+    p1x: number,
+    p1y: number,
+    steps = 30,
+  ): number {
+    let minDist = Infinity;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const mt = 1 - t;
+      const bx = mt * mt * p0x + 2 * mt * t * cpx + t * t * p1x;
+      const by = mt * mt * p0y + 2 * mt * t * cpy + t * t * p1y;
+      const d = Math.sqrt((px - bx) ** 2 + (py - by) ** 2);
+      if (d < minDist) minDist = d;
+    }
+    return minDist;
+  }
+
   function getEdgeAtPosition(screenX: number, screenY: number, graph?: Graph): Edge | null {
     const currentPan = panRef.current;
     const currentZoom = zoomRef.current;
     const targetGraphs = graph ? [graph] : showAllGraphs ? graphsToRender : activeGraph ? [activeGraph] : [];
     const vertexRadius = 24;
     const loopRadius = 20;
+
     for (const g of targetGraphs) {
       const local = {
         x: (screenX - currentPan.x - g.offsetX * currentZoom) / currentZoom,
@@ -685,14 +794,23 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         const source = g.vertices.find((v) => v.id === edge.source);
         const target = g.vertices.find((v) => v.id === edge.target);
         if (!source || !target) continue;
+
         if (edge.source === edge.target) {
           const loopCenterX = source.x + vertexRadius * 0.7;
           const loopCenterY = source.y - vertexRadius * 0.7;
           const dist = Math.sqrt((local.x - loopCenterX) ** 2 + (local.y - loopCenterY) ** 2);
           if (Math.abs(dist - loopRadius) < 8) return edge;
         } else {
-          const dist = distanceToLineSegment(local.x, local.y, source.x, source.y, target.x, target.y);
-          if (dist < 10) return edge;
+          const isBidirectional = g.directed && hasReverseEdge(g, edge.source, edge.target);
+
+          if (isBidirectional) {
+            const { startX, startY, cpX, cpY, endX, endY } = getCurvedEdgePoints(source, target, vertexRadius);
+            const d = distanceToQuadraticBezier(local.x, local.y, startX, startY, cpX, cpY, endX, endY);
+            if (d < 12) return edge;
+          } else {
+            const d = distanceToLineSegment(local.x, local.y, source.x, source.y, target.x, target.y);
+            if (d < 10) return edge;
+          }
         }
       }
     }
