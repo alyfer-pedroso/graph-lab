@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import { useGraphStore } from "@/lib/graph-store";
 import { useDijkstraStore } from "@/lib/dijkstra-store";
+import { useTreeStore } from "@/lib/tree-store";
 import type { Vertex, Edge, Graph } from "@/lib/graph-types";
 
 interface GraphCanvasProps {
@@ -128,10 +129,12 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   } = useGraphStore();
 
   const { dijkstraHighlight } = useDijkstraStore();
+  const { treeHighlight } = useTreeStore();
 
   const selectedVertexIdsRef = useRef(selectedVertexIds);
   const selectedEdgeIdsRef = useRef(selectedEdgeIds);
   const dijkstraHighlightRef = useRef(dijkstraHighlight);
+  const treeHighlightRef = useRef(treeHighlight);
   useEffect(() => {
     selectedVertexIdsRef.current = selectedVertexIds;
   }, [selectedVertexIds]);
@@ -141,6 +144,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   useEffect(() => {
     dijkstraHighlightRef.current = dijkstraHighlight;
   }, [dijkstraHighlight]);
+  useEffect(() => {
+    treeHighlightRef.current = treeHighlight;
+  }, [treeHighlight]);
 
   const targetGraphId = graphId || activeGraphId;
   const activeGraph = graphs.find((g) => g.id === targetGraphId);
@@ -164,7 +170,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   }, [pan]);
 
   useEffect(() => {
-    if (dijkstraHighlight) {
+    if (dijkstraHighlight || treeHighlight) {
       const animate = (time: number) => {
         animTimeRef.current = time;
         draw();
@@ -181,7 +187,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       }
     }
     //eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dijkstraHighlight]);
+  }, [dijkstraHighlight, treeHighlight]);
 
   function hasReverseEdge(graph: Graph, sourceId: string, targetId: string): boolean {
     if (!graph.directed) return false;
@@ -228,6 +234,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     const currentPan = panRef.current;
     const currentZoom = zoomRef.current;
     const dh = dijkstraHighlightRef.current;
+    const th = treeHighlightRef.current;
     const t = animTimeRef.current;
 
     ctx.fillStyle = "#0a0a0a";
@@ -264,10 +271,13 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         const isActive = graph.id === activeGraphId;
         const isSelected = isActive && selectedEdgeIdsRef.current.includes(edge.id);
 
-        let dijkstraEdgeState: "none" | "active" | "path" = "none";
+        let dijkstraEdgeState: "none" | "active" | "path" | "tree-mst" | "tree-span" = "none";
         if (dh && isActive) {
           if (dh.pathEdges.has(edge.id)) dijkstraEdgeState = "path";
           else if (dh.activeEdges.has(edge.id)) dijkstraEdgeState = "active";
+        }
+        if (th && isActive && th.treeEdges.has(edge.id)) {
+          dijkstraEdgeState = th.type === "mst" ? "tree-mst" : "tree-span";
         }
 
         if (edge.source === edge.target) {
@@ -300,7 +310,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         const isSelected = isActive && selectedVertexIdsRef.current.includes(vertex.id);
         const isEdgeSource = isActive && vertex.id === edgeSourceId;
 
-        let dijkstraVertexState: "none" | "current" | "visited" | "path" | "start" | "target" = "none";
+        let dijkstraVertexState: "none" | "current" | "visited" | "path" | "start" | "target" | "tree-root" | "tree-node" = "none";
         if (dh && isActive) {
           if (dh.pathVertices.has(vertex.id)) {
             dijkstraVertexState = vertex.id === dh.targetVertex && dh.isFinished ? "target" : "path";
@@ -311,6 +321,10 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
           } else if (vertex.id === dh.startVertex) {
             dijkstraVertexState = "start";
           }
+        }
+        if (th && isActive) {
+          if (vertex.id === th.rootVertex) dijkstraVertexState = "tree-root";
+          else if (th.treeVertices.has(vertex.id)) dijkstraVertexState = "tree-node";
         }
 
         drawVertex(ctx, vertex, isSelected, isEdgeSource, isActive, dijkstraVertexState, t);
@@ -338,10 +352,10 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   }, [graphsToRender, activeGraph, canvasSize, isCreatingEdge, edgeSourceId, activeGraphId]);
 
   useEffect(() => {
-    if (!dijkstraHighlight) {
+    if (!dijkstraHighlight && !treeHighlight) {
       draw();
     }
-  }, [draw, pan, zoom, selectionBox, mousePos, selectedVertexIds, selectedEdgeIds, dijkstraHighlight]);
+  }, [draw, pan, zoom, selectionBox, mousePos, selectedVertexIds, selectedEdgeIds, dijkstraHighlight, treeHighlight]);
 
   function drawVertex(
     ctx: CanvasRenderingContext2D,
@@ -349,7 +363,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     isSelected: boolean,
     isEdgeSource: boolean,
     isActive: boolean,
-    dijkstraState: "none" | "current" | "visited" | "path" | "start" | "target",
+    dijkstraState: "none" | "current" | "visited" | "path" | "start" | "target" | "tree-root" | "tree-node",
     time: number,
   ) {
     const radius = 24;
@@ -372,6 +386,12 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     } else if (dijkstraState === "visited") {
       ctx.shadowBlur = 10;
       ctx.shadowColor = "#3b82f6";
+    } else if (dijkstraState === "tree-root") {
+      ctx.shadowBlur = 20 + pulse * 15;
+      ctx.shadowColor = "#f59e0b";
+    } else if (dijkstraState === "tree-node") {
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = "#fbbf24";
     } else if (isSelected || isEdgeSource) {
       ctx.shadowBlur = 20;
       ctx.shadowColor = isEdgeSource ? "#22c55e" : "#3b82f6";
@@ -397,6 +417,12 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     } else if (dijkstraState === "visited") {
       gradient.addColorStop(0, "#60a5fa");
       gradient.addColorStop(1, "#1d4ed8");
+    } else if (dijkstraState === "tree-root") {
+      gradient.addColorStop(0, "#fbbf24");
+      gradient.addColorStop(1, "#b45309");
+    } else if (dijkstraState === "tree-node") {
+      gradient.addColorStop(0, "#fcd34d");
+      gradient.addColorStop(1, "#d97706");
     } else if (isSelected) {
       gradient.addColorStop(0, "#60a5fa");
       gradient.addColorStop(1, "#2563eb");
@@ -418,6 +444,8 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     if (dijkstraState === "current" || dijkstraState === "start" || dijkstraState === "target") strokeColor = "#86efac";
     else if (dijkstraState === "path") strokeColor = "#6ee7b7";
     else if (dijkstraState === "visited") strokeColor = "#93c5fd";
+    else if (dijkstraState === "tree-root") strokeColor = "#fde68a";
+    else if (dijkstraState === "tree-node") strokeColor = "#fcd34d";
     else if (isSelected) strokeColor = "#93c5fd";
     else if (isEdgeSource) strokeColor = "#86efac";
 
@@ -442,7 +470,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     isSelected: boolean,
     isActive: boolean,
     isWeighted: boolean,
-    dijkstraState: "none" | "active" | "path",
+    dijkstraState: "none" | "active" | "path" | "tree-mst" | "tree-span",
     time: number,
     isBidirectional: boolean = false,
   ) {
@@ -463,6 +491,16 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       lineWidth = 3;
       ctx.shadowBlur = 6 + pulse * 6;
       ctx.shadowColor = "#3b82f6";
+    } else if (dijkstraState === "tree-mst") {
+      edgeColor = "#f59e0b";
+      lineWidth = 3.5;
+      ctx.shadowBlur = 8 + pulse * 8;
+      ctx.shadowColor = "#f59e0b";
+    } else if (dijkstraState === "tree-span") {
+      edgeColor = "#fbbf24";
+      lineWidth = 3;
+      ctx.shadowBlur = 6 + pulse * 6;
+      ctx.shadowColor = "#fbbf24";
     }
 
     ctx.strokeStyle = edgeColor;
@@ -541,7 +579,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     edge: Edge,
     isWeighted: boolean,
     isSelected: boolean,
-    dijkstraState: "none" | "active" | "path",
+    dijkstraState: "none" | "active" | "path" | "tree-mst" | "tree-span",
     labelX: number,
     labelY: number,
   ) {
@@ -556,15 +594,49 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       const bw = textW + padX * 2;
       const bh = 18;
 
-      ctx.fillStyle =
-        dijkstraState === "path" ? "rgba(34,197,94,0.25)" : dijkstraState === "active" ? "rgba(59,130,246,0.25)" : "rgba(10,10,10,0.85)";
-      ctx.strokeStyle = dijkstraState === "path" ? "#22c55e" : dijkstraState === "active" ? "#3b82f6" : isSelected ? "#3b82f6" : "#4b5563";
+      const bgFill =
+        dijkstraState === "path"
+          ? "rgba(34,197,94,0.25)"
+          : dijkstraState === "active"
+            ? "rgba(59,130,246,0.25)"
+            : dijkstraState === "tree-mst"
+              ? "rgba(245,158,11,0.3)"
+              : dijkstraState === "tree-span"
+                ? "rgba(251,191,36,0.25)"
+                : "rgba(10,10,10,0.85)";
+      const strokeC =
+        dijkstraState === "path"
+          ? "#22c55e"
+          : dijkstraState === "active"
+            ? "#3b82f6"
+            : dijkstraState === "tree-mst"
+              ? "#f59e0b"
+              : dijkstraState === "tree-span"
+                ? "#fbbf24"
+                : isSelected
+                  ? "#3b82f6"
+                  : "#4b5563";
+      const textC =
+        dijkstraState === "path"
+          ? "#4ade80"
+          : dijkstraState === "active"
+            ? "#93c5fd"
+            : dijkstraState === "tree-mst"
+              ? "#fde68a"
+              : dijkstraState === "tree-span"
+                ? "#fef3c7"
+                : isSelected
+                  ? "#60a5fa"
+                  : "#e5e7eb";
+
+      ctx.fillStyle = bgFill;
+      ctx.strokeStyle = strokeC;
       ctx.lineWidth = 1.5;
       roundRect(ctx, labelX - bw / 2, labelY - bh / 2, bw, bh, 4);
       ctx.fill();
       ctx.stroke();
 
-      ctx.fillStyle = dijkstraState === "path" ? "#4ade80" : dijkstraState === "active" ? "#93c5fd" : isSelected ? "#60a5fa" : "#e5e7eb";
+      ctx.fillStyle = textC;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(weightText, labelX, labelY);
@@ -614,7 +686,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     isSelected: boolean,
     isActive: boolean,
     isWeighted: boolean,
-    dijkstraState: "none" | "active" | "path",
+    dijkstraState: "none" | "active" | "path" | "tree-mst" | "tree-span",
     time: number,
   ) {
     const vertexRadius = 24;

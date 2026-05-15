@@ -311,6 +311,33 @@ export function analyzeGraph(graph: Graph): GraphAnalysis {
   };
 }
 
+export function isForest(graph: Graph): boolean {
+  if (graph.vertices.length === 0) return true;
+  return !hasCycle(graph);
+}
+
+export function countConnectedComponents(graph: Graph): number {
+  const visited = new Set<string>();
+  let count = 0;
+  for (const v of graph.vertices) {
+    if (visited.has(v.id)) continue;
+    count++;
+    const queue: string[] = [v.id];
+    visited.add(v.id);
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      const neighbors = getNeighbors(graph, cur);
+      for (const n of neighbors) {
+        if (!visited.has(n)) {
+          visited.add(n);
+          queue.push(n);
+        }
+      }
+    }
+  }
+  return count;
+}
+
 function buildAdjList(graph: Graph): Map<string, Set<string>> {
   const adj = new Map<string, Set<string>>();
   for (const v of graph.vertices) adj.set(v.id, new Set());
@@ -438,6 +465,240 @@ function findIsomorphismMappingBacktrack(g1: Graph, g2: Graph): Map<string, stri
 
   if (backtrack(0)) return new Map(mapping);
   return null;
+}
+
+export function calculateChromaticNumber(graph: Graph): { chromaticNumber: number; colorMap: Map<string, number> } | null {
+  const n = graph.vertices.length;
+  if (n === 0) return { chromaticNumber: 0, colorMap: new Map() };
+
+  const hasLoop = graph.edges.some((e) => e.source === e.target);
+  if (hasLoop) return null;
+
+  const adj = buildAdjList(graph);
+
+  const degrees = calculateDegrees(graph).degree;
+  const ordered = [...graph.vertices].sort((a, b) => (degrees.get(b.id) ?? 0) - (degrees.get(a.id) ?? 0)).map((v) => v.id);
+
+  function tryColoring(idx: number, k: number, colorMap: Map<string, number>): boolean {
+    if (idx === ordered.length) return true;
+    const v = ordered[idx];
+    const neighbors = adj.get(v) || new Set<string>();
+    const used = new Set<number>();
+    for (const nb of neighbors) {
+      const c = colorMap.get(nb);
+      if (c !== undefined) used.add(c);
+    }
+    for (let c = 0; c < k; c++) {
+      if (used.has(c)) continue;
+      colorMap.set(v, c);
+      if (tryColoring(idx + 1, k, colorMap)) return true;
+      colorMap.delete(v);
+    }
+    return false;
+  }
+
+  let lower = 1;
+  if (graph.edges.length === 0) {
+    const colorMap = new Map<string, number>();
+    graph.vertices.forEach((v) => colorMap.set(v.id, 0));
+    return { chromaticNumber: 1, colorMap };
+  }
+  if (!isBipartite(graph)) lower = 3;
+  else lower = 2;
+
+  for (let k = lower; k <= n; k++) {
+    const colorMap = new Map<string, number>();
+    if (tryColoring(0, k, colorMap)) {
+      return { chromaticNumber: k, colorMap };
+    }
+  }
+  return { chromaticNumber: n, colorMap: new Map() };
+}
+
+export const CHROMATIC_COLORS = [
+  "#ef4444",
+  "#3b82f6",
+  "#22c55e",
+  "#f59e0b",
+  "#a855f7",
+  "#06b6d4",
+  "#ec4899",
+  "#14b8a6",
+  "#f97316",
+  "#84cc16",
+  "#6366f1",
+  "#eab308",
+];
+
+export function findSpanningTree(graph: Graph, rootId: string): { edges: string[]; visited: string[]; isComplete: boolean } | null {
+  if (!graph.vertices.find((v) => v.id === rootId)) return null;
+  if (graph.vertices.length === 0) return { edges: [], visited: [], isComplete: true };
+
+  const visited = new Set<string>();
+  const treeEdges: string[] = [];
+  const queue: string[] = [rootId];
+  visited.add(rootId);
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const edge of graph.edges) {
+      if (edge.source === edge.target) continue;
+      let neighbor: string | null = null;
+      if (edge.source === current && !visited.has(edge.target)) neighbor = edge.target;
+      else if (!graph.directed && edge.target === current && !visited.has(edge.source)) neighbor = edge.source;
+
+      if (neighbor) {
+        visited.add(neighbor);
+        treeEdges.push(edge.id);
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  const isComplete = visited.size === graph.vertices.length;
+  return { edges: treeEdges, visited: Array.from(visited), isComplete };
+}
+
+export function findMinimumSpanningTree(graph: Graph): { edges: string[]; totalWeight: number; isComplete: boolean } | null {
+  if (graph.vertices.length === 0) return { edges: [], totalWeight: 0, isComplete: true };
+  if (graph.directed) return null;
+
+  const sortedEdges = [...graph.edges].filter((e) => e.source !== e.target).sort((a, b) => (a.weight ?? 1) - (b.weight ?? 1));
+
+  const parent = new Map<string, string>();
+  graph.vertices.forEach((v) => parent.set(v.id, v.id));
+
+  function find(x: string): string {
+    let root = x;
+    while (parent.get(root) !== root) root = parent.get(root)!;
+    let cur = x;
+    while (parent.get(cur) !== root) {
+      const next = parent.get(cur)!;
+      parent.set(cur, root);
+      cur = next;
+    }
+    return root;
+  }
+
+  function union(x: string, y: string): boolean {
+    const rx = find(x);
+    const ry = find(y);
+    if (rx === ry) return false;
+    parent.set(rx, ry);
+    return true;
+  }
+
+  const mstEdges: string[] = [];
+  let totalWeight = 0;
+
+  for (const e of sortedEdges) {
+    if (union(e.source, e.target)) {
+      mstEdges.push(e.id);
+      totalWeight += e.weight ?? 1;
+      if (mstEdges.length === graph.vertices.length - 1) break;
+    }
+  }
+
+  const isComplete = mstEdges.length === graph.vertices.length - 1;
+  return { edges: mstEdges, totalWeight, isComplete };
+}
+
+export interface TreeAnalysis {
+  isTree: boolean;
+  vertexCount: number;
+  edgeCount: number;
+  leafCount: number;
+  internalCount: number;
+  leaves: string[];
+  diameter: number;
+  diameterPath: string[];
+  center: string[];
+  vertexEdgeRelation: string;
+}
+
+export function analyzeTree(graph: Graph): TreeAnalysis {
+  const tree = isTree(graph);
+  const degrees = calculateDegrees(graph).degree;
+  const leaves: string[] = [];
+  const internals: string[] = [];
+
+  graph.vertices.forEach((v) => {
+    const d = degrees.get(v.id) ?? 0;
+    if (d <= 1) leaves.push(v.id);
+    else internals.push(v.id);
+  });
+
+  let diameter = 0;
+  let diameterPath: string[] = [];
+  let center: string[] = [];
+
+  if (tree && graph.vertices.length > 0) {
+    function bfsFarthest(startId: string): { farthest: string; dist: number; parent: Map<string, string | null> } {
+      const dist = new Map<string, number>();
+      const parent = new Map<string, string | null>();
+      const queue: string[] = [startId];
+      dist.set(startId, 0);
+      parent.set(startId, null);
+      let farthest = startId;
+      let maxDist = 0;
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        const cd = dist.get(cur)!;
+        if (cd > maxDist) {
+          maxDist = cd;
+          farthest = cur;
+        }
+        const neighbors = getNeighbors(graph, cur);
+        for (const n of neighbors) {
+          if (!dist.has(n)) {
+            dist.set(n, cd + 1);
+            parent.set(n, cur);
+            queue.push(n);
+          }
+        }
+      }
+      return { farthest, dist: maxDist, parent };
+    }
+
+    const first = bfsFarthest(graph.vertices[0].id);
+    const second = bfsFarthest(first.farthest);
+    diameter = second.dist;
+
+    let cur: string | null = second.farthest;
+    while (cur !== null) {
+      diameterPath.unshift(cur);
+      cur = second.parent.get(cur) ?? null;
+    }
+
+    const mid = Math.floor(diameterPath.length / 2);
+    if (diameterPath.length % 2 === 1) {
+      center = [diameterPath[mid]];
+    } else if (diameterPath.length > 0) {
+      center = [diameterPath[mid - 1], diameterPath[mid]];
+    }
+  }
+
+  const n = graph.vertices.length;
+  const m = graph.edges.filter((e) => e.source !== e.target).length;
+  let relation: string;
+  if (n === 0) relation = "Grafo vazio";
+  else if (tree) relation = `m = n - 1 (${m} = ${n} - 1) ✓`;
+  else if (m < n - 1) relation = `m < n - 1 (${m} < ${n - 1}) — desconexo`;
+  else if (m === n - 1) relation = `m = n - 1 (${m} = ${n} - 1) — desconexo com ciclo`;
+  else relation = `m > n - 1 (${m} > ${n - 1}) — contém ciclos`;
+
+  return {
+    isTree: tree,
+    vertexCount: n,
+    edgeCount: m,
+    leafCount: leaves.length,
+    internalCount: internals.length,
+    leaves,
+    diameter,
+    diameterPath,
+    center,
+    vertexEdgeRelation: relation,
+  };
 }
 
 export function generateVertexLabel(existingLabels: string[]): string {

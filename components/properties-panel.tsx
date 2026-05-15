@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { Wand2 } from "lucide-react";
+import { Wand2, Palette, RotateCcw } from "lucide-react";
 import { useGraphStore } from "@/lib/graph-store";
+import { calculateChromaticNumber, CHROMATIC_COLORS } from "@/lib/graph-algorithms";
 
 const COLORS = [
   "#6366f1",
@@ -40,6 +41,30 @@ export function PropertiesPanel() {
   const [vertexLabel, setVertexLabel] = useState("");
   const [edgeLabel, setEdgeLabel] = useState("");
   const [edgeWeight, setEdgeWeight] = useState("");
+  const [chromaticResult, setChromaticResult] = useState<{ chromaticNumber: number; error?: string } | null>(null);
+
+  function applyChromaticColoring() {
+    if (!activeGraph) return;
+    const result = calculateChromaticNumber(activeGraph);
+    if (!result) {
+      setChromaticResult({ chromaticNumber: 0, error: "Grafo contém laços — número cromático indefinido" });
+      return;
+    }
+    result.colorMap.forEach((colorIdx, vertexId) => {
+      const color = CHROMATIC_COLORS[colorIdx % CHROMATIC_COLORS.length];
+      updateVertex(vertexId, { color });
+    });
+    setChromaticResult({ chromaticNumber: result.chromaticNumber });
+  }
+
+  function resetColoring() {
+    if (!activeGraph) return;
+    const defaultColor = activeGraph.defaultVertexColor || "#6366f1";
+    activeGraph.vertices.forEach((v) => {
+      updateVertex(v.id, { color: defaultColor });
+    });
+    setChromaticResult(null);
+  }
 
   useEffect(() => {
     if (selectedVertex) {
@@ -94,6 +119,39 @@ export function PropertiesPanel() {
             Auto-nomear Arestas (e1, e2...)
           </Button>
         </div>
+      </div>
+
+      <Separator />
+
+      <div className="space-y-3">
+        <h3 className="font-semibold text-sm">Número Cromático</h3>
+        <p className="text-xs text-muted-foreground">
+          Calcula a quantidade mínima de cores para colorir vértices de modo que nenhum vértice adjacente compartilhe a mesma cor.
+        </p>
+        <div className="space-y-2">
+          <Button variant="default" size="sm" className="w-full" onClick={applyChromaticColoring} disabled={!activeGraph || activeGraph.vertices.length === 0}>
+            <Palette className="h-4 w-4 mr-2" />
+            Calcular e Colorir
+          </Button>
+          <Button variant="outline" size="sm" className="w-full" onClick={resetColoring} disabled={!activeGraph || activeGraph.vertices.length === 0}>
+            <RotateCcw className="h-4 w-4 mr-2" />
+            Resetar Cores
+          </Button>
+        </div>
+        {chromaticResult && (
+          <div className={`p-2 rounded-md border ${chromaticResult.error ? "bg-destructive/10 border-destructive/30" : "bg-primary/10 border-primary/30"}`}>
+            {chromaticResult.error ? (
+              <p className="text-xs text-destructive font-medium">{chromaticResult.error}</p>
+            ) : (
+              <div className="space-y-1">
+                <p className="text-xs font-medium">
+                  χ(G) = <span className="text-primary text-base font-bold">{chromaticResult.chromaticNumber}</span>
+                </p>
+                <p className="text-xs text-muted-foreground">{chromaticResult.chromaticNumber} cor(es) necessária(s) para colorir o grafo.</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <Separator />
