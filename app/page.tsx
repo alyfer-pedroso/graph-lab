@@ -21,6 +21,8 @@ import {
   Download,
   Menu,
   Layers,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -38,6 +40,7 @@ import { MatrixPanel } from "@/components/matrix-panel";
 import { AnalysisPanel } from "@/components/analysis-panel";
 import { ComparisonPanel } from "@/components/comparison-panel";
 import { useGraphStore } from "@/lib/graph-store";
+import { useIsMobilePortrait } from "@/hooks/use-mobile-portrait";
 
 function ShortcutGroup({ title, items }: { title: string; items: [string, string][] }) {
   return (
@@ -62,6 +65,17 @@ export default function GraphSimulator() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [activeTab, setActiveTab] = useState("properties");
+  const [toolsOverlayVisible, setToolsOverlayVisible] = useState(true);
+  const isMobilePortrait = useIsMobilePortrait();
+
+  const toolsHeaderClassName = isMobilePortrait
+    ? [
+        "absolute top-0 left-0 right-0 z-30 p-2 pr-14",
+        "border-b border-border bg-card/95 backdrop-blur shadow-md",
+        "flex items-center gap-2 flex-wrap transition-transform duration-200",
+        toolsOverlayVisible ? "translate-y-0" : "-translate-y-full",
+      ].join(" ")
+    : "p-2 border-b border-border flex items-center gap-2 shrink-0 flex-wrap";
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -258,22 +272,20 @@ export default function GraphSimulator() {
                   <div>
                     <h4 className="font-semibold mb-1">Desfazer e Refazer</h4>
                     <p className="text-muted-foreground">
-                      Use os botões da toolbar ou os atalhos Ctrl+Z para desfazer e Ctrl+Y para refazer. O histórico cobre criações, exclusões,
-                      edições e movimentos de vértices.
+                      Use os botões da toolbar ou os atalhos Ctrl+Z para desfazer e Ctrl+Y para refazer.
                     </p>
                   </div>
                   <div>
                     <h4 className="font-semibold mb-1">Camadas de Grafos</h4>
                     <p className="text-muted-foreground">
-                      Use a barra lateral esquerda para controlar opacidade, visibilidade e posição de cada grafo. Na ferramenta Mover (H), arraste a
-                      área vazia para deslocar a vista.
+                      Use a barra lateral esquerda para controlar opacidade, visibilidade e posição de cada grafo.
                     </p>
                   </div>
                   <div>
                     <h4 className="font-semibold mb-1">Gestos em Mobile</h4>
                     <p className="text-muted-foreground">
-                      Toque para selecionar, arraste para mover vértices e use dois dedos para aplicar zoom. Os botões e menus estão otimizados para
-                      uso com toque.
+                      Toque para selecionar, arraste para mover vértices e use dois dedos para aplicar zoom. Em modo retrato, use o botão flutuante
+                      para ocultar ou mostrar a barra de ferramentas e liberar espaço no canvas.
                     </p>
                   </div>
                   <div>
@@ -314,8 +326,20 @@ export default function GraphSimulator() {
             </aside>
           )}
 
-          <main className="flex-1 flex flex-col overflow-hidden min-w-0">
-            <div className="p-2 border-b border-border flex items-center gap-2 shrink-0 flex-wrap">
+          <main className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
+            {isMobilePortrait && (
+              <Button
+                variant="secondary"
+                size="icon"
+                onClick={() => setToolsOverlayVisible((v) => !v)}
+                className="absolute top-2 right-2 z-40 h-10 w-10 rounded-full shadow-md border border-border"
+                aria-label={toolsOverlayVisible ? "Ocultar ferramentas" : "Mostrar ferramentas"}
+                aria-expanded={toolsOverlayVisible}
+              >
+                {toolsOverlayVisible ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            )}
+            <div className={toolsHeaderClassName}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-9 w-9 hidden md:flex shrink-0" onClick={() => setLeftOpen(!leftOpen)}>
