@@ -36,6 +36,11 @@ export interface Graph {
 
 export type Tool = "select" | "vertex" | "edge" | "delete" | "pan";
 
+export interface HistorySnapshot {
+  graphs: Graph[];
+  activeGraphId: string | null;
+}
+
 export interface GraphState {
   graphs: Graph[];
   activeGraphId: string | null;
@@ -46,7 +51,13 @@ export interface GraphState {
   edgeSourceId: string | null;
   compareMode: boolean;
   compareGraphId: string | null;
+  gridSnap: boolean;
+  past: HistorySnapshot[];
+  future: HistorySnapshot[];
 }
+
+export const GRID_SIZE = 40;
+export const HISTORY_LIMIT = 50;
 
 export type AdjacencyMatrix = number[][];
 export type IncidenceMatrix = number[][];

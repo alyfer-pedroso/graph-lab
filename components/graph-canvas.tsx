@@ -4,7 +4,7 @@ import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHand
 import { useGraphStore } from "@/lib/graph-store";
 import { useDijkstraStore } from "@/lib/dijkstra-store";
 import { useTreeStore } from "@/lib/tree-store";
-import type { Vertex, Edge, Graph } from "@/lib/graph-types";
+import { GRID_SIZE, type Vertex, type Edge, type Graph } from "@/lib/graph-types";
 
 interface GraphCanvasProps {
   graphId?: string;
@@ -28,6 +28,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width, height });
+  const dprRef = useRef<number>(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1);
 
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panRef = useRef({ x: 0, y: 0 });
@@ -60,6 +61,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   const [isMovingSelection, setIsMovingSelection] = useState(false);
   const moveStart = useRef({ x: 0, y: 0 });
   const isMovingSelectionRef = useRef(false);
+  const movingVerticesStartRef = useRef<Map<string, { x: number; y: number }> | null>(null);
+  const dragHistoryPushedRef = useRef(false);
+  const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
   const [_, setDragVertex] = useState<string | null>(null);
@@ -97,7 +101,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
           const ctx2 = offscreen.getContext("2d")!;
           ctx2.fillStyle = "#ffffff";
           ctx2.fillRect(0, 0, offscreen.width, offscreen.height);
-          ctx2.drawImage(canvas, 0, 0);
+          ctx2.drawImage(canvas, 0, 0, offscreen.width, offscreen.height);
           link.href = offscreen.toDataURL("image/jpeg", 0.95);
         } else {
           link.href = canvas.toDataURL("image/png");
@@ -116,6 +120,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     tool,
     isCreatingEdge,
     edgeSourceId,
+    gridSnap,
     addVertex,
     moveVertex,
     addEdge,
@@ -126,6 +131,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     clearSelection,
     startEdgeCreation,
     cancelEdgeCreation,
+    pushHistory,
   } = useGraphStore();
 
   const { dijkstraHighlight } = useDijkstraStore();
@@ -135,6 +141,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   const selectedEdgeIdsRef = useRef(selectedEdgeIds);
   const dijkstraHighlightRef = useRef(dijkstraHighlight);
   const treeHighlightRef = useRef(treeHighlight);
+  const gridSnapRef = useRef(gridSnap);
   useEffect(() => {
     selectedVertexIdsRef.current = selectedVertexIds;
   }, [selectedVertexIds]);
@@ -147,6 +154,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   useEffect(() => {
     treeHighlightRef.current = treeHighlight;
   }, [treeHighlight]);
+  useEffect(() => {
+    gridSnapRef.current = gridSnap;
+  }, [gridSnap]);
 
   const targetGraphId = graphId || activeGraphId;
   const activeGraph = graphs.find((g) => g.id === targetGraphId);
@@ -164,6 +174,27 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     observer.observe(container);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    function handleDprChange() {
+      dprRef.current = window.devicePixelRatio || 1;
+      draw();
+    }
+    const mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    mql.addEventListener?.("change", handleDprChange);
+    return () => mql.removeEventListener?.("change", handleDprChange);
+    //eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = dprRef.current;
+    canvas.width = Math.max(1, Math.floor(canvasSize.width * dpr));
+    canvas.height = Math.max(1, Math.floor(canvasSize.height * dpr));
+    canvas.style.width = `${canvasSize.width}px`;
+    canvas.style.height = `${canvasSize.height}px`;
+  }, [canvasSize]);
 
   useEffect(() => {
     panRef.current = pan;
@@ -236,6 +267,11 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     const dh = dijkstraHighlightRef.current;
     const th = treeHighlightRef.current;
     const t = animTimeRef.current;
+    const dpr = dprRef.current;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
 
     ctx.fillStyle = "#0a0a0a";
     ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
@@ -801,6 +837,34 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     };
   }
 
+  function snapVertexPosition(x: number, y: number, graph: Graph): { x: number; y: number } {
+    if (!gridSnapRef.current) return { x, y };
+    const snappedX = Math.round((x + graph.offsetX) / GRID_SIZE) * GRID_SIZE - graph.offsetX;
+    const snappedY = Math.round((y + graph.offsetY) / GRID_SIZE) * GRID_SIZE - graph.offsetY;
+    return { x: snappedX, y: snappedY };
+  }
+
+  function snapGroupDelta(dx: number, dy: number, anchor: { x: number; y: number }, graph: Graph): { dx: number; dy: number } {
+    if (!gridSnapRef.current) return { dx, dy };
+    const targetX = anchor.x + dx + graph.offsetX;
+    const targetY = anchor.y + dy + graph.offsetY;
+    const snappedX = Math.round(targetX / GRID_SIZE) * GRID_SIZE;
+    const snappedY = Math.round(targetY / GRID_SIZE) * GRID_SIZE;
+    return {
+      dx: snappedX - graph.offsetX - anchor.x,
+      dy: snappedY - graph.offsetY - anchor.y,
+    };
+  }
+
+  function snapshotSelectedVertices(graph: Graph): Map<string, { x: number; y: number }> {
+    const snapshot = new Map<string, { x: number; y: number }>();
+    for (const id of selectedVertexIdsRef.current) {
+      const v = graph.vertices.find((vx) => vx.id === id);
+      if (v) snapshot.set(id, { x: v.x, y: v.y });
+    }
+    return snapshot;
+  }
+
   function getVertexAtPosition(screenX: number, screenY: number, graph?: Graph): { vertex: Vertex; graphId: string } | null {
     const currentPan = panRef.current;
     const currentZoom = zoomRef.current;
@@ -945,11 +1009,15 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
           setIsMovingSelection(true);
           isMovingSelectionRef.current = true;
           moveStart.current = pos;
+          if (activeGraph) movingVerticesStartRef.current = snapshotSelectedVertices(activeGraph);
+          dragHistoryPushedRef.current = false;
         } else {
           selectVertex(vertexId, e.shiftKey);
           setIsDragging(true);
           dragVertexRef.current = vertexId;
           setDragVertex(vertexId);
+          dragHistoryPushedRef.current = false;
+          dragOriginRef.current = pos;
         }
       } else if (edge) {
         selectEdge(edge.id, e.shiftKey);
@@ -1013,21 +1081,35 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       return;
     }
 
-    if (isMovingSelectionRef.current && activeGraph) {
-      const dx = (pos.x - moveStart.current.x) / zoomRef.current;
-      const dy = (pos.y - moveStart.current.y) / zoomRef.current;
-      moveStart.current = pos;
+    if (isMovingSelectionRef.current && activeGraph && movingVerticesStartRef.current) {
+      const totalDx = (pos.x - moveStart.current.x) / zoomRef.current;
+      const totalDy = (pos.y - moveStart.current.y) / zoomRef.current;
+      const anchorId = selectedVertexIdsRef.current[0];
+      const anchor = movingVerticesStartRef.current.get(anchorId);
+      const { dx, dy } = anchor
+        ? snapGroupDelta(totalDx, totalDy, anchor, activeGraph)
+        : { dx: totalDx, dy: totalDy };
+      if ((dx !== 0 || dy !== 0) && !dragHistoryPushedRef.current) {
+        pushHistory();
+        dragHistoryPushedRef.current = true;
+      }
       const store = useGraphStore.getState();
-      for (const id of selectedVertexIdsRef.current) {
-        const v = activeGraph.vertices.find((v) => v.id === id);
-        if (v) store.moveVertex(id, v.x + dx, v.y + dy);
+      for (const [id, start] of movingVerticesStartRef.current) {
+        store.moveVertex(id, start.x + dx, start.y + dy);
       }
       return;
     }
 
     if (isDragging && dragVertexRef.current && activeGraph) {
       const local = screenToGraph(pos.x, pos.y, activeGraph);
-      moveVertex(dragVertexRef.current, local.x, local.y);
+      const snapped = snapVertexPosition(local.x, local.y, activeGraph);
+      const origin = dragOriginRef.current;
+      const moved = !origin || Math.abs(pos.x - origin.x) > 1 || Math.abs(pos.y - origin.y) > 1;
+      if (moved && !dragHistoryPushedRef.current) {
+        pushHistory();
+        dragHistoryPushedRef.current = true;
+      }
+      moveVertex(dragVertexRef.current, snapped.x, snapped.y);
     }
   }
 
@@ -1062,6 +1144,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     setIsPanning(false);
     setIsMovingSelection(false);
     isMovingSelectionRef.current = false;
+    movingVerticesStartRef.current = null;
+    dragHistoryPushedRef.current = false;
+    dragOriginRef.current = null;
   }
 
   function handleContextMenu(e: React.MouseEvent<HTMLCanvasElement>) {
@@ -1151,11 +1236,15 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
             setIsMovingSelection(true);
             isMovingSelectionRef.current = true;
             moveStart.current = pos;
+            if (activeGraph) movingVerticesStartRef.current = snapshotSelectedVertices(activeGraph);
+            dragHistoryPushedRef.current = false;
           } else {
             selectVertex(vertexId, false);
             setIsDragging(true);
             dragVertexRef.current = vertexId;
             setDragVertex(vertexId);
+            dragHistoryPushedRef.current = false;
+            dragOriginRef.current = pos;
           }
         } else if (edge) {
           selectEdge(edge.id, false);
@@ -1232,14 +1321,21 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         return;
       }
 
-      if (isMovingSelectionRef.current && activeGraph) {
-        const last = lastTouchRef.current || pos;
-        const dx = (pos.x - last.x) / zoomRef.current;
-        const dy = (pos.y - last.y) / zoomRef.current;
+      if (isMovingSelectionRef.current && activeGraph && movingVerticesStartRef.current) {
+        const totalDx = (pos.x - moveStart.current.x) / zoomRef.current;
+        const totalDy = (pos.y - moveStart.current.y) / zoomRef.current;
+        const anchorId = selectedVertexIdsRef.current[0];
+        const anchor = movingVerticesStartRef.current.get(anchorId);
+        const { dx, dy } = anchor
+          ? snapGroupDelta(totalDx, totalDy, anchor, activeGraph)
+          : { dx: totalDx, dy: totalDy };
+        if ((dx !== 0 || dy !== 0) && !dragHistoryPushedRef.current) {
+          pushHistory();
+          dragHistoryPushedRef.current = true;
+        }
         const store = useGraphStore.getState();
-        for (const id of selectedVertexIdsRef.current) {
-          const v = activeGraph.vertices.find((v) => v.id === id);
-          if (v) store.moveVertex(id, v.x + dx, v.y + dy);
+        for (const [id, start] of movingVerticesStartRef.current) {
+          store.moveVertex(id, start.x + dx, start.y + dy);
         }
         lastTouchRef.current = pos;
         return;
@@ -1247,7 +1343,14 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
 
       if (isDragging && dragVertexRef.current && activeGraph) {
         const local = screenToGraph(pos.x, pos.y, activeGraph);
-        moveVertex(dragVertexRef.current, local.x, local.y);
+        const snapped = snapVertexPosition(local.x, local.y, activeGraph);
+        const origin = dragOriginRef.current;
+        const moved = !origin || Math.abs(pos.x - origin.x) > 1 || Math.abs(pos.y - origin.y) > 1;
+        if (moved && !dragHistoryPushedRef.current) {
+          pushHistory();
+          dragHistoryPushedRef.current = true;
+        }
+        moveVertex(dragVertexRef.current, snapped.x, snapped.y);
         lastTouchRef.current = pos;
         return;
       }
@@ -1278,6 +1381,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       isMovingSelectionRef.current = false;
       lastTouchRef.current = null;
       touchStartRef.current = null;
+      movingVerticesStartRef.current = null;
+      dragHistoryPushedRef.current = false;
+      dragOriginRef.current = null;
     }
   }
 
@@ -1294,9 +1400,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     <div ref={containerRef} className="relative w-full h-full min-h-75 bg-background rounded-lg overflow-hidden border border-border">
       <canvas
         ref={canvasRef}
-        width={canvasSize.width}
-        height={canvasSize.height}
-        style={{ cursor: cursorStyle, touchAction: "none" }}
+        style={{ cursor: cursorStyle, touchAction: "none", width: canvasSize.width, height: canvasSize.height }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
