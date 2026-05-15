@@ -46,7 +46,10 @@ export interface GraphState {
   edgeSourceId: string | null;
   compareMode: boolean;
   compareGraphId: string | null;
+  gridSnap: boolean;
 }
+
+export const GRID_SIZE = 40;
 
 export type AdjacencyMatrix = number[][];
 export type IncidenceMatrix = number[][];

@@ -59,6 +59,9 @@ interface GraphStore extends GraphState {
   setCompareMode: (enabled: boolean) => void;
   setCompareGraph: (id: string | null) => void;
 
+  setGridSnap: (enabled: boolean) => void;
+  toggleGridSnap: () => void;
+
   autoLabelVertices: () => void;
   autoLabelEdges: () => void;
 
@@ -85,6 +88,7 @@ export const useGraphStore = create<GraphStore>()(
       edgeSourceId: null,
       compareMode: false,
       compareGraphId: null,
+      gridSnap: true,
 
       createGraph: (name, directed = false, weighted = false) => {
         const id = generateId();
@@ -354,6 +358,14 @@ export const useGraphStore = create<GraphStore>()(
         set({ compareGraphId: id });
       },
 
+      setGridSnap: (enabled) => {
+        set({ gridSnap: enabled });
+      },
+
+      toggleGridSnap: () => {
+        set((state) => ({ gridSnap: !state.gridSnap }));
+      },
+
       autoLabelVertices: () => {
         set((state) => ({
           graphs: state.graphs.map((g) =>
@@ -426,6 +438,7 @@ export const useGraphStore = create<GraphStore>()(
       partialize: (state) => ({
         graphs: state.graphs,
         activeGraphId: state.activeGraphId,
+        gridSnap: state.gridSnap,
       }),
     },
   ),

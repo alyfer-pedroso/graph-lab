@@ -1,6 +1,6 @@
 "use client"
 
-import { MousePointer2, Circle, ArrowRight, Trash2, Move, Undo2, Redo2 } from "lucide-react"
+import { MousePointer2, Circle, ArrowRight, Trash2, Move, Magnet } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip"
 import { useGraphStore } from "@/lib/graph-store"
@@ -15,7 +15,7 @@ const tools: { id: Tool; icon: React.ElementType; label: string; shortcut: strin
 ]
 
 export function GraphToolbar() {
-  const { tool, setTool, clearGraph, activeGraphId } = useGraphStore()
+  const { tool, setTool, clearGraph, activeGraphId, gridSnap, toggleGridSnap } = useGraphStore()
 
   return (
     <TooltipProvider>
@@ -37,6 +37,25 @@ export function GraphToolbar() {
             </TooltipContent>
           </Tooltip>
         ))}
+
+        <div className="w-px h-6 bg-border mx-1" />
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={gridSnap ? "default" : "ghost"}
+              size="icon"
+              onClick={toggleGridSnap}
+              className="h-9 w-9"
+              aria-pressed={gridSnap}
+            >
+              <Magnet className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{gridSnap ? "Desativar Snap à Grade" : "Ativar Snap à Grade"}</p>
+          </TooltipContent>
+        </Tooltip>
 
         <div className="w-px h-6 bg-border mx-1" />
 
