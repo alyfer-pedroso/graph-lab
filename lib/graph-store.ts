@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { Graph, Vertex, Edge, Tool, GraphState } from "./graph-types";
+import type { Graph, Vertex, Edge, Tool, GraphState, HistorySnapshot } from "./graph-types";
+import { HISTORY_LIMIT } from "./graph-types";
 import { generateVertexLabel, generateEdgeLabel } from "./graph-algorithms";
 
 function generateId(): string {
@@ -62,6 +63,12 @@ interface GraphStore extends GraphState {
   setGridSnap: (enabled: boolean) => void;
   toggleGridSnap: () => void;
 
+  pushHistory: () => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
+
   autoLabelVertices: () => void;
   autoLabelEdges: () => void;
 
@@ -76,6 +83,17 @@ interface GraphStore extends GraphState {
 
 const initialGraph = createDefaultGraph();
 
+function takeSnapshot(state: { graphs: Graph[]; activeGraphId: string | null }): HistorySnapshot {
+  return { graphs: state.graphs, activeGraphId: state.activeGraphId };
+}
+
+function withHistory(state: { graphs: Graph[]; activeGraphId: string | null; past: HistorySnapshot[] }) {
+  return {
+    past: [...state.past, takeSnapshot(state)].slice(-HISTORY_LIMIT),
+    future: [] as HistorySnapshot[],
+  };
+}
+
 export const useGraphStore = create<GraphStore>()(
   persist(
     (set, get) => ({
@@ -89,6 +107,8 @@ export const useGraphStore = create<GraphStore>()(
       compareMode: false,
       compareGraphId: null,
       gridSnap: true,
+      past: [],
+      future: [],
 
       createGraph: (name, directed = false, weighted = false) => {
         const id = generateId();
@@ -108,6 +128,7 @@ export const useGraphStore = create<GraphStore>()(
           defaultVertexColor: getGraphDefaultColor(graphIndex),
         };
         set((state) => ({
+          ...withHistory(state),
           graphs: [...state.graphs, newGraph],
           activeGraphId: id,
         }));
@@ -134,6 +155,7 @@ export const useGraphStore = create<GraphStore>()(
         const safeId = currentGraphs.some((g) => g.id === id) ? generateId() : id;
         newGraph.id = safeId;
         set((state) => ({
+          ...withHistory(state),
           graphs: [...state.graphs, newGraph],
           activeGraphId: safeId,
         }));
@@ -142,7 +164,8 @@ export const useGraphStore = create<GraphStore>()(
 
       resetAllGraphs: () => {
         const defaultGraph = createDefaultGraph();
-        set({
+        set((state) => ({
+          ...withHistory(state),
           graphs: [defaultGraph],
           activeGraphId: defaultGraph.id,
           selectedVertexIds: [],
@@ -150,21 +173,24 @@ export const useGraphStore = create<GraphStore>()(
           compareGraphId: null,
           isCreatingEdge: false,
           edgeSourceId: null,
-        });
+        }));
       },
 
       deleteGraph: (id) => {
         set((state) => {
+          const history = withHistory(state);
           const newGraphs = state.graphs.filter((g) => g.id !== id);
           if (newGraphs.length === 0) {
             const defaultGraph = createDefaultGraph();
             return {
+              ...history,
               graphs: [defaultGraph],
               activeGraphId: defaultGraph.id,
               compareGraphId: null,
             };
           }
           return {
+            ...history,
             graphs: newGraphs,
             activeGraphId: state.activeGraphId === id ? newGraphs[0].id : state.activeGraphId,
             compareGraphId: state.compareGraphId === id ? null : state.compareGraphId,
@@ -178,6 +204,7 @@ export const useGraphStore = create<GraphStore>()(
 
       updateGraph: (id, updates) => {
         set((state) => ({
+          ...withHistory(state),
           graphs: state.graphs.map((g) => (g.id === id ? { ...g, ...updates } : g)),
         }));
       },
@@ -201,6 +228,7 @@ export const useGraphStore = create<GraphStore>()(
         };
 
         set((state) => ({
+          ...withHistory(state),
           graphs: [...state.graphs, newGraph],
           activeGraphId: newId,
         }));
@@ -209,6 +237,7 @@ export const useGraphStore = create<GraphStore>()(
 
       clearGraph: (id) => {
         set((state) => ({
+          ...withHistory(state),
           graphs: state.graphs.map((g) => (g.id === id ? { ...g, vertices: [], edges: [] } : g)),
           selectedVertexIds: [],
           selectedEdgeIds: [],
@@ -232,6 +261,7 @@ export const useGraphStore = create<GraphStore>()(
         };
 
         set((state) => ({
+          ...withHistory(state),
           graphs: state.graphs.map((g) => (g.id === state.activeGraphId ? { ...g, vertices: [...g.vertices, newVertex] } : g)),
         }));
         return newVertex.id;
@@ -239,6 +269,7 @@ export const useGraphStore = create<GraphStore>()(
 
       updateVertex: (id, updates) => {
         set((state) => ({
+          ...withHistory(state),
           graphs: state.graphs.map((g) =>
             g.id === state.activeGraphId ? { ...g, vertices: g.vertices.map((v) => (v.id === id ? { ...v, ...updates } : v)) } : g,
           ),
@@ -247,6 +278,7 @@ export const useGraphStore = create<GraphStore>()(
 
       deleteVertex: (id) => {
         set((state) => ({
+          ...withHistory(state),
           graphs: state.graphs.map((g) =>
             g.id === state.activeGraphId
               ? {
@@ -290,6 +322,7 @@ export const useGraphStore = create<GraphStore>()(
         };
 
         set((state) => ({
+          ...withHistory(state),
           graphs: state.graphs.map((g) => (g.id === state.activeGraphId ? { ...g, edges: [...g.edges, newEdge] } : g)),
           isCreatingEdge: false,
           edgeSourceId: null,
@@ -299,6 +332,7 @@ export const useGraphStore = create<GraphStore>()(
 
       updateEdge: (id, updates) => {
         set((state) => ({
+          ...withHistory(state),
           graphs: state.graphs.map((g) =>
             g.id === state.activeGraphId ? { ...g, edges: g.edges.map((e) => (e.id === id ? { ...e, ...updates } : e)) } : g,
           ),
@@ -307,6 +341,7 @@ export const useGraphStore = create<GraphStore>()(
 
       deleteEdge: (id) => {
         set((state) => ({
+          ...withHistory(state),
           graphs: state.graphs.map((g) => (g.id === state.activeGraphId ? { ...g, edges: g.edges.filter((e) => e.id !== id) } : g)),
           selectedEdgeIds: state.selectedEdgeIds.filter((e) => e !== id),
         }));
@@ -366,8 +401,52 @@ export const useGraphStore = create<GraphStore>()(
         set((state) => ({ gridSnap: !state.gridSnap }));
       },
 
+      pushHistory: () => {
+        set((state) => withHistory(state));
+      },
+
+      undo: () => {
+        set((state) => {
+          if (state.past.length === 0) return state;
+          const previous = state.past[state.past.length - 1];
+          const newPast = state.past.slice(0, -1);
+          return {
+            past: newPast,
+            future: [...state.future, takeSnapshot(state)].slice(-HISTORY_LIMIT),
+            graphs: previous.graphs,
+            activeGraphId: previous.activeGraphId,
+            selectedVertexIds: [],
+            selectedEdgeIds: [],
+            isCreatingEdge: false,
+            edgeSourceId: null,
+          };
+        });
+      },
+
+      redo: () => {
+        set((state) => {
+          if (state.future.length === 0) return state;
+          const next = state.future[state.future.length - 1];
+          const newFuture = state.future.slice(0, -1);
+          return {
+            past: [...state.past, takeSnapshot(state)].slice(-HISTORY_LIMIT),
+            future: newFuture,
+            graphs: next.graphs,
+            activeGraphId: next.activeGraphId,
+            selectedVertexIds: [],
+            selectedEdgeIds: [],
+            isCreatingEdge: false,
+            edgeSourceId: null,
+          };
+        });
+      },
+
+      canUndo: () => get().past.length > 0,
+      canRedo: () => get().future.length > 0,
+
       autoLabelVertices: () => {
         set((state) => ({
+          ...withHistory(state),
           graphs: state.graphs.map((g) =>
             g.id === state.activeGraphId
               ? {
@@ -384,6 +463,7 @@ export const useGraphStore = create<GraphStore>()(
 
       autoLabelEdges: () => {
         set((state) => ({
+          ...withHistory(state),
           graphs: state.graphs.map((g) =>
             g.id === state.activeGraphId
               ? {
@@ -412,6 +492,7 @@ export const useGraphStore = create<GraphStore>()(
 
       setGraphOffset: (id, offsetX, offsetY) => {
         set((state) => ({
+          ...withHistory(state),
           graphs: state.graphs.map((g) => (g.id === id ? { ...g, offsetX, offsetY } : g)),
         }));
       },

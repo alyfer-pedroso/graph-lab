@@ -28,6 +28,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width, height });
+  const dprRef = useRef<number>(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1);
 
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panRef = useRef({ x: 0, y: 0 });
@@ -61,6 +62,8 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   const moveStart = useRef({ x: 0, y: 0 });
   const isMovingSelectionRef = useRef(false);
   const movingVerticesStartRef = useRef<Map<string, { x: number; y: number }> | null>(null);
+  const dragHistoryPushedRef = useRef(false);
+  const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
   const [_, setDragVertex] = useState<string | null>(null);
@@ -98,7 +101,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
           const ctx2 = offscreen.getContext("2d")!;
           ctx2.fillStyle = "#ffffff";
           ctx2.fillRect(0, 0, offscreen.width, offscreen.height);
-          ctx2.drawImage(canvas, 0, 0);
+          ctx2.drawImage(canvas, 0, 0, offscreen.width, offscreen.height);
           link.href = offscreen.toDataURL("image/jpeg", 0.95);
         } else {
           link.href = canvas.toDataURL("image/png");
@@ -128,6 +131,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     clearSelection,
     startEdgeCreation,
     cancelEdgeCreation,
+    pushHistory,
   } = useGraphStore();
 
   const { dijkstraHighlight } = useDijkstraStore();
@@ -170,6 +174,27 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     observer.observe(container);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    function handleDprChange() {
+      dprRef.current = window.devicePixelRatio || 1;
+      draw();
+    }
+    const mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    mql.addEventListener?.("change", handleDprChange);
+    return () => mql.removeEventListener?.("change", handleDprChange);
+    //eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = dprRef.current;
+    canvas.width = Math.max(1, Math.floor(canvasSize.width * dpr));
+    canvas.height = Math.max(1, Math.floor(canvasSize.height * dpr));
+    canvas.style.width = `${canvasSize.width}px`;
+    canvas.style.height = `${canvasSize.height}px`;
+  }, [canvasSize]);
 
   useEffect(() => {
     panRef.current = pan;
@@ -242,6 +267,11 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     const dh = dijkstraHighlightRef.current;
     const th = treeHighlightRef.current;
     const t = animTimeRef.current;
+    const dpr = dprRef.current;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
 
     ctx.fillStyle = "#0a0a0a";
     ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
@@ -980,11 +1010,14 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
           isMovingSelectionRef.current = true;
           moveStart.current = pos;
           if (activeGraph) movingVerticesStartRef.current = snapshotSelectedVertices(activeGraph);
+          dragHistoryPushedRef.current = false;
         } else {
           selectVertex(vertexId, e.shiftKey);
           setIsDragging(true);
           dragVertexRef.current = vertexId;
           setDragVertex(vertexId);
+          dragHistoryPushedRef.current = false;
+          dragOriginRef.current = pos;
         }
       } else if (edge) {
         selectEdge(edge.id, e.shiftKey);
@@ -1056,6 +1089,10 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       const { dx, dy } = anchor
         ? snapGroupDelta(totalDx, totalDy, anchor, activeGraph)
         : { dx: totalDx, dy: totalDy };
+      if ((dx !== 0 || dy !== 0) && !dragHistoryPushedRef.current) {
+        pushHistory();
+        dragHistoryPushedRef.current = true;
+      }
       const store = useGraphStore.getState();
       for (const [id, start] of movingVerticesStartRef.current) {
         store.moveVertex(id, start.x + dx, start.y + dy);
@@ -1066,6 +1103,12 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     if (isDragging && dragVertexRef.current && activeGraph) {
       const local = screenToGraph(pos.x, pos.y, activeGraph);
       const snapped = snapVertexPosition(local.x, local.y, activeGraph);
+      const origin = dragOriginRef.current;
+      const moved = !origin || Math.abs(pos.x - origin.x) > 1 || Math.abs(pos.y - origin.y) > 1;
+      if (moved && !dragHistoryPushedRef.current) {
+        pushHistory();
+        dragHistoryPushedRef.current = true;
+      }
       moveVertex(dragVertexRef.current, snapped.x, snapped.y);
     }
   }
@@ -1102,6 +1145,8 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     setIsMovingSelection(false);
     isMovingSelectionRef.current = false;
     movingVerticesStartRef.current = null;
+    dragHistoryPushedRef.current = false;
+    dragOriginRef.current = null;
   }
 
   function handleContextMenu(e: React.MouseEvent<HTMLCanvasElement>) {
@@ -1192,11 +1237,14 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
             isMovingSelectionRef.current = true;
             moveStart.current = pos;
             if (activeGraph) movingVerticesStartRef.current = snapshotSelectedVertices(activeGraph);
+            dragHistoryPushedRef.current = false;
           } else {
             selectVertex(vertexId, false);
             setIsDragging(true);
             dragVertexRef.current = vertexId;
             setDragVertex(vertexId);
+            dragHistoryPushedRef.current = false;
+            dragOriginRef.current = pos;
           }
         } else if (edge) {
           selectEdge(edge.id, false);
@@ -1281,6 +1329,10 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         const { dx, dy } = anchor
           ? snapGroupDelta(totalDx, totalDy, anchor, activeGraph)
           : { dx: totalDx, dy: totalDy };
+        if ((dx !== 0 || dy !== 0) && !dragHistoryPushedRef.current) {
+          pushHistory();
+          dragHistoryPushedRef.current = true;
+        }
         const store = useGraphStore.getState();
         for (const [id, start] of movingVerticesStartRef.current) {
           store.moveVertex(id, start.x + dx, start.y + dy);
@@ -1292,6 +1344,12 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       if (isDragging && dragVertexRef.current && activeGraph) {
         const local = screenToGraph(pos.x, pos.y, activeGraph);
         const snapped = snapVertexPosition(local.x, local.y, activeGraph);
+        const origin = dragOriginRef.current;
+        const moved = !origin || Math.abs(pos.x - origin.x) > 1 || Math.abs(pos.y - origin.y) > 1;
+        if (moved && !dragHistoryPushedRef.current) {
+          pushHistory();
+          dragHistoryPushedRef.current = true;
+        }
         moveVertex(dragVertexRef.current, snapped.x, snapped.y);
         lastTouchRef.current = pos;
         return;
@@ -1324,6 +1382,8 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       lastTouchRef.current = null;
       touchStartRef.current = null;
       movingVerticesStartRef.current = null;
+      dragHistoryPushedRef.current = false;
+      dragOriginRef.current = null;
     }
   }
 
@@ -1340,9 +1400,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     <div ref={containerRef} className="relative w-full h-full min-h-75 bg-background rounded-lg overflow-hidden border border-border">
       <canvas
         ref={canvasRef}
-        width={canvasSize.width}
-        height={canvasSize.height}
-        style={{ cursor: cursorStyle, touchAction: "none" }}
+        style={{ cursor: cursorStyle, touchAction: "none", width: canvasSize.width, height: canvasSize.height }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}

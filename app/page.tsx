@@ -39,8 +39,24 @@ import { AnalysisPanel } from "@/components/analysis-panel";
 import { ComparisonPanel } from "@/components/comparison-panel";
 import { useGraphStore } from "@/lib/graph-store";
 
+function ShortcutGroup({ title, items }: { title: string; items: [string, string][] }) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{title}</h4>
+      <div className="grid gap-1.5">
+        {items.map(([label, key]) => (
+          <div key={key} className="flex items-center justify-between">
+            <span>{label}</span>
+            <kbd className="px-2 py-1 bg-muted rounded text-xs font-mono">{key}</kbd>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function GraphSimulator() {
-  const { setTool, tool } = useGraphStore();
+  const { setTool, tool, undo, redo, toggleGridSnap } = useGraphStore();
   const [zoom, setZoom] = useState(1);
   const canvasRef = useRef<GraphCanvasRef>(null);
   const [leftOpen, setLeftOpen] = useState(true);
@@ -50,6 +66,23 @@ export default function GraphSimulator() {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      const isMod = e.ctrlKey || e.metaKey;
+      if (isMod) {
+        const key = e.key.toLowerCase();
+        if (key === "z" && !e.shiftKey) {
+          e.preventDefault();
+          undo();
+          return;
+        }
+        if (key === "y" || (key === "z" && e.shiftKey)) {
+          e.preventDefault();
+          redo();
+          return;
+        }
+        return;
+      }
+
       switch (e.key.toLowerCase()) {
         case "v":
           setTool("select");
@@ -66,11 +99,14 @@ export default function GraphSimulator() {
         case "h":
           setTool("pan");
           break;
+        case "g":
+          toggleGridSnap();
+          break;
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [setTool]);
+  }, [setTool, undo, redo, toggleGridSnap]);
 
   const toolLabel: Record<string, string> = {
     select: "Selecionar",
@@ -137,7 +173,7 @@ export default function GraphSimulator() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <Button variant="ghost" size="icon" className="h-9 w-9 sm:h-8 sm:w-8">
                       <Download className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -152,41 +188,53 @@ export default function GraphSimulator() {
 
             <Dialog>
               <DialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:flex">
+                <Button variant="ghost" size="icon" className="h-9 w-9 sm:h-8 sm:w-8">
                   <Keyboard className="h-4 w-4" />
                 </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="max-w-md">
                 <DialogHeader>
                   <DialogTitle>Atalhos de Teclado</DialogTitle>
                   <DialogDescription>Use atalhos para trabalhar mais rápido.</DialogDescription>
                 </DialogHeader>
-                <div className="grid gap-2 text-sm">
-                  {[
-                    ["Selecionar", "V"],
-                    ["Novo Vértice", "N"],
-                    ["Nova Aresta", "E"],
-                    ["Excluir", "D"],
-                    ["Mover Canvas", "H"],
-                    ["Deletar Seleção", "Delete"],
-                    ["Cancelar", "Esc"],
-                  ].map(([label, key]) => (
-                    <div key={key} className="flex justify-between">
-                      <span>{label}</span>
-                      <kbd className="px-2 py-1 bg-muted rounded text-xs">{key}</kbd>
-                    </div>
-                  ))}
+                <div className="space-y-4 text-sm">
+                  <ShortcutGroup
+                    title="Ferramentas"
+                    items={[
+                      ["Selecionar", "V"],
+                      ["Novo Vértice", "N"],
+                      ["Nova Aresta", "E"],
+                      ["Excluir", "D"],
+                      ["Mover Canvas", "H"],
+                    ]}
+                  />
+                  <ShortcutGroup
+                    title="Histórico"
+                    items={[
+                      ["Desfazer", "Ctrl+Z"],
+                      ["Refazer", "Ctrl+Y"],
+                      ["Refazer (alternativo)", "Ctrl+Shift+Z"],
+                    ]}
+                  />
+                  <ShortcutGroup
+                    title="Edição"
+                    items={[
+                      ["Deletar Seleção", "Delete"],
+                      ["Cancelar Ação", "Esc"],
+                      ["Snap à Grade", "G"],
+                    ]}
+                  />
                 </div>
               </DialogContent>
             </Dialog>
 
             <Dialog>
               <DialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:flex">
+                <Button variant="ghost" size="icon" className="h-9 w-9 sm:h-8 sm:w-8">
                   <HelpCircle className="h-4 w-4" />
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Como Usar</DialogTitle>
                   <DialogDescription>Aprenda a usar o simulador de grafos.</DialogDescription>
@@ -194,17 +242,38 @@ export default function GraphSimulator() {
                 <div className="space-y-4 text-sm">
                   <div>
                     <h4 className="font-semibold mb-1">Criar Vértices</h4>
-                    <p className="text-muted-foreground">Selecione a ferramenta de vértice (N) e clique no canvas.</p>
+                    <p className="text-muted-foreground">Selecione a ferramenta de vértice (N) e clique no canvas para adicionar.</p>
                   </div>
                   <div>
                     <h4 className="font-semibold mb-1">Criar Arestas</h4>
                     <p className="text-muted-foreground">Selecione a ferramenta de aresta (E), clique no vértice origem e depois no destino.</p>
                   </div>
                   <div>
+                    <h4 className="font-semibold mb-1">Mover Vértices</h4>
+                    <p className="text-muted-foreground">
+                      Use a ferramenta Selecionar (V) e arraste qualquer vértice. Quando o Snap à Grade (G) está ativado, os vértices se alinham
+                      automaticamente à grade ao serem movidos.
+                    </p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold mb-1">Desfazer e Refazer</h4>
+                    <p className="text-muted-foreground">
+                      Use os botões da toolbar ou os atalhos Ctrl+Z para desfazer e Ctrl+Y para refazer. O histórico cobre criações, exclusões,
+                      edições e movimentos de vértices.
+                    </p>
+                  </div>
+                  <div>
                     <h4 className="font-semibold mb-1">Camadas de Grafos</h4>
                     <p className="text-muted-foreground">
                       Use a barra lateral esquerda para controlar opacidade, visibilidade e posição de cada grafo. Na ferramenta Mover (H), arraste a
-                      área vazia para mover o grafo ativo como camada.
+                      área vazia para deslocar a vista.
+                    </p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold mb-1">Gestos em Mobile</h4>
+                    <p className="text-muted-foreground">
+                      Toque para selecionar, arraste para mover vértices e use dois dedos para aplicar zoom. Os botões e menus estão otimizados para
+                      uso com toque.
                     </p>
                   </div>
                   <div>
@@ -249,7 +318,7 @@ export default function GraphSimulator() {
             <div className="p-2 border-b border-border flex items-center gap-2 shrink-0 flex-wrap">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 hidden md:flex shrink-0" onClick={() => setLeftOpen(!leftOpen)}>
+                  <Button variant="ghost" size="icon" className="h-9 w-9 hidden md:flex shrink-0" onClick={() => setLeftOpen(!leftOpen)}>
                     {leftOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
                   </Button>
                 </TooltipTrigger>
@@ -258,11 +327,11 @@ export default function GraphSimulator() {
 
               <Sheet>
                 <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden shrink-0">
-                    <Layers className="h-4 w-4" />
+                  <Button variant="ghost" size="icon" className="h-10 w-10 md:hidden shrink-0">
+                    <Layers className="h-5 w-5" />
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="left" className="w-72 p-0">
+                <SheetContent side="left" className="w-[85vw] max-w-sm p-0">
                   <GraphManager />
                 </SheetContent>
               </Sheet>
@@ -277,7 +346,12 @@ export default function GraphSimulator() {
 
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setZoom(Math.max(0.1, zoom - 0.1))}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 sm:h-8 sm:w-8"
+                      onClick={() => setZoom(Math.max(0.1, zoom - 0.1))}
+                    >
                       <ZoomOut className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
@@ -300,9 +374,16 @@ export default function GraphSimulator() {
                   <span className="text-xs text-muted-foreground">%</span>
                 </div>
 
+                <span className="sm:hidden text-xs text-muted-foreground tabular-nums w-10 text-center">{Math.round(zoom * 100)}%</span>
+
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setZoom(Math.min(3, zoom + 0.1))}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 sm:h-8 sm:w-8"
+                      onClick={() => setZoom(Math.min(3, zoom + 0.1))}
+                    >
                       <ZoomIn className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
@@ -311,7 +392,12 @@ export default function GraphSimulator() {
 
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => canvasRef.current?.resetView()}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 sm:h-8 sm:w-8"
+                      onClick={() => canvasRef.current?.resetView()}
+                    >
                       <RotateCcw className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
@@ -320,7 +406,7 @@ export default function GraphSimulator() {
 
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 hidden lg:flex" onClick={() => setRightOpen(!rightOpen)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 hidden lg:flex" onClick={() => setRightOpen(!rightOpen)}>
                       {rightOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
                     </Button>
                   </TooltipTrigger>
@@ -329,18 +415,18 @@ export default function GraphSimulator() {
 
                 <Sheet>
                   <SheetTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 lg:hidden">
-                      <Menu className="h-4 w-4" />
+                    <Button variant="ghost" size="icon" className="h-10 w-10 lg:hidden">
+                      <Menu className="h-5 w-5" />
                     </Button>
                   </SheetTrigger>
-                  <SheetContent side="right" className="w-80 p-0">
+                  <SheetContent side="right" className="w-[90vw] max-w-sm p-0">
                     <RightPanelContent />
                   </SheetContent>
                 </Sheet>
               </div>
             </div>
 
-            <div className="flex-1 p-2 sm:p-4 overflow-hidden">
+            <div className="flex-1 p-1.5 sm:p-4 overflow-hidden">
               <GraphCanvas ref={canvasRef} zoom={zoom} onZoomChange={setZoom} showAllGraphs={true} />
             </div>
           </main>
