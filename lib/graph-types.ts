@@ -29,6 +29,9 @@ export interface Graph {
   offsetY: number;
 
   defaultVertexColor?: string;
+
+  chromaticNumber?: number;
+  chromaticColors?: string[];
 }
 
 export type Tool = "select" | "vertex" | "edge" | "delete" | "pan";

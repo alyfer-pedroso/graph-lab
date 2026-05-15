@@ -7,27 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { Wand2 } from "lucide-react";
+import { Wand2, Palette, RotateCcw } from "lucide-react";
 import { useGraphStore } from "@/lib/graph-store";
-
-const COLORS = [
-  "#6366f1",
-  "#8b5cf6",
-  "#a855f7",
-  "#d946ef",
-  "#ec4899",
-  "#f43f5e",
-  "#ef4444",
-  "#f97316",
-  "#f59e0b",
-  "#eab308",
-  "#84cc16",
-  "#22c55e",
-  "#10b981",
-  "#14b8a6",
-  "#06b6d4",
-  "#0ea5e9",
-];
+import { calculateChromaticNumber, CHROMATIC_COLORS, COLORS } from "@/lib/graph-algorithms";
 
 export function PropertiesPanel() {
   const { graphs, activeGraphId, selectedVertexIds, selectedEdgeIds, updateVertex, updateEdge, updateGraph, autoLabelVertices, autoLabelEdges } =
@@ -40,6 +22,39 @@ export function PropertiesPanel() {
   const [vertexLabel, setVertexLabel] = useState("");
   const [edgeLabel, setEdgeLabel] = useState("");
   const [edgeWeight, setEdgeWeight] = useState("");
+  const [chromaticError, setChromaticError] = useState<string | null>(null);
+
+  const chromaticResult =
+    activeGraph?.chromaticNumber !== undefined ? { chromaticNumber: activeGraph.chromaticNumber, colors: activeGraph.chromaticColors || [] } : null;
+
+  function applyChromaticColoring() {
+    if (!activeGraph) return;
+    setChromaticError(null);
+    const result = calculateChromaticNumber(activeGraph);
+    if (!result) {
+      setChromaticError("Grafo contém laços — número cromático indefinido");
+      updateGraph(activeGraph.id, { chromaticNumber: undefined, chromaticColors: undefined });
+      return;
+    }
+    const usedColors = new Set<string>();
+    result.colorMap.forEach((colorIdx, vertexId) => {
+      const color = CHROMATIC_COLORS[colorIdx % CHROMATIC_COLORS.length];
+      usedColors.add(color);
+      updateVertex(vertexId, { color });
+    });
+    updateGraph(activeGraph.id, { chromaticNumber: result.chromaticNumber, chromaticColors: Array.from(usedColors) });
+  }
+
+  function resetColoring() {
+    if (!activeGraph) return;
+
+    const defaultColor = activeGraph.defaultVertexColor || "#6366f1";
+    activeGraph.vertices.forEach((v) => {
+      updateVertex(v.id, { color: defaultColor });
+    });
+    updateGraph(activeGraph.id, { chromaticNumber: undefined, chromaticColors: undefined });
+    setChromaticError(null);
+  }
 
   useEffect(() => {
     if (selectedVertex) {
@@ -82,6 +97,11 @@ export function PropertiesPanel() {
         <div className="flex flex-wrap gap-2">
           <Badge variant="secondary">{activeGraph.vertices.length} vértices</Badge>
           <Badge variant="secondary">{activeGraph.edges.length} arestas</Badge>
+          {chromaticResult && (
+            <Badge variant="default" className="bg-primary/20 text-primary border border-primary/40">
+              χ(G) = {chromaticResult.chromaticNumber}
+            </Badge>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -94,6 +114,63 @@ export function PropertiesPanel() {
             Auto-nomear Arestas (e1, e2...)
           </Button>
         </div>
+      </div>
+
+      <Separator />
+
+      <div className="space-y-3">
+        <h3 className="font-semibold text-sm">Número Cromático</h3>
+        <p className="text-xs text-muted-foreground">
+          Calcula a quantidade mínima de cores para colorir vértices de modo que nenhum vértice adjacente compartilhe a mesma cor.
+        </p>
+        <div className="space-y-2">
+          <Button
+            variant="default"
+            size="sm"
+            className="w-full"
+            onClick={applyChromaticColoring}
+            disabled={!activeGraph || activeGraph.vertices.length === 0}
+          >
+            <Palette className="h-4 w-4 mr-2" />
+            Calcular e Colorir
+          </Button>
+          <Button variant="outline" size="sm" className="w-full" onClick={resetColoring} disabled={!activeGraph || activeGraph.vertices.length === 0}>
+            <RotateCcw className="h-4 w-4 mr-2" />
+            Resetar Cores
+          </Button>
+        </div>
+        {chromaticError && (
+          <div className="p-3 rounded-md border bg-destructive/10 border-destructive/30">
+            <p className="text-xs text-destructive font-medium">{chromaticError}</p>
+          </div>
+        )}
+        {chromaticResult && !chromaticError && (
+          <div className="p-3 rounded-md border bg-primary/10 border-primary/30">
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs text-muted-foreground">Número cromático</span>
+                <span className="text-2xl font-bold text-primary leading-none">{chromaticResult.chromaticNumber}</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">{chromaticResult.chromaticNumber}</span> cor(es) necessária(s) para colorir o grafo
+                sem conflitos.
+              </p>
+              {chromaticResult.colors.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Cores aplicadas:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {chromaticResult.colors.map((c, i) => (
+                      <div key={c} className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-background">
+                        <span className="inline-block w-3 h-3 rounded-full border border-border" style={{ backgroundColor: c }} />
+                        <span className="text-[10px] text-muted-foreground">#{i + 1}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <Separator />

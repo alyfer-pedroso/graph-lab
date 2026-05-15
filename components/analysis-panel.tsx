@@ -9,8 +9,20 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useGraphStore } from "@/lib/graph-store";
 import { useDijkstraStore } from "@/lib/dijkstra-store";
-import { analyzeGraph, bfs, dfs, calculateDegrees } from "@/lib/graph-algorithms";
+import { useTreeStore } from "@/lib/tree-store";
+import {
+  analyzeGraph,
+  bfs,
+  dfs,
+  calculateDegrees,
+  findSpanningTree,
+  findMinimumSpanningTree,
+  analyzeTree,
+  isForest,
+  countConnectedComponents,
+} from "@/lib/graph-algorithms";
 import type { PathResult } from "@/lib/graph-types";
+import { TreePine, Network as NetworkIcon, Trash2 } from "lucide-react";
 
 interface DijkstraStep {
   current: string;
@@ -141,9 +153,15 @@ function reconstructPath(previous: Map<string, string | null>, startId: string, 
 
 export function AnalysisPanel() {
   const setDijkstraHighlight = useDijkstraStore.getState().setDijkstraHighlight;
+  const setTreeHighlight = useTreeStore.getState().setTreeHighlight;
 
   const { graphs, activeGraphId } = useGraphStore();
   const activeGraph = graphs.find((g) => g.id === activeGraphId);
+
+  const [spanningRoot, setSpanningRoot] = useState<string>("");
+  const [spanningResult, setSpanningResult] = useState<{ edges: string[]; visited: string[]; isComplete: boolean } | null>(null);
+  const [mstResult, setMstResult] = useState<{ edges: string[]; totalWeight: number; isComplete: boolean } | null>(null);
+  const [mstError, setMstError] = useState<string | null>(null);
 
   const [startVertex, setStartVertex] = useState<string>("");
   const [endVertex, setEndVertex] = useState<string>("");
@@ -186,6 +204,73 @@ export function AnalysisPanel() {
     if (!activeGraph) return null;
     return calculateDegrees(activeGraph);
   }, [activeGraph]);
+
+  const treeAnalysis = useMemo(() => {
+    if (!activeGraph) return null;
+    return analyzeTree(activeGraph);
+  }, [activeGraph]);
+
+  const componentsCount = useMemo(() => {
+    if (!activeGraph) return 0;
+    return countConnectedComponents(activeGraph);
+  }, [activeGraph]);
+
+  const forestFlag = useMemo(() => {
+    if (!activeGraph) return false;
+    return isForest(activeGraph);
+  }, [activeGraph]);
+
+  useEffect(() => {
+    return () => {
+      setTreeHighlight(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function runSpanningTree() {
+    if (!activeGraph || !spanningRoot) return;
+    const result = findSpanningTree(activeGraph, spanningRoot);
+    if (!result) return;
+    setSpanningResult(result);
+    setMstResult(null);
+    setMstError(null);
+    setTreeHighlight({
+      treeEdges: new Set(result.edges),
+      treeVertices: new Set(result.visited),
+      rootVertex: spanningRoot,
+      type: "spanning",
+    });
+  }
+
+  function runMST() {
+    if (!activeGraph) return;
+    if (activeGraph.directed) {
+      setMstError("AGM requer grafo não direcionado.");
+      setMstResult(null);
+      return;
+    }
+    const result = findMinimumSpanningTree(activeGraph);
+    if (!result) {
+      setMstError("Não foi possível calcular AGM.");
+      return;
+    }
+    setMstResult(result);
+    setSpanningResult(null);
+    setMstError(null);
+    setTreeHighlight({
+      treeEdges: new Set(result.edges),
+      treeVertices: new Set(activeGraph.vertices.map((v) => v.id)),
+      rootVertex: null,
+      type: "mst",
+    });
+  }
+
+  function clearTreeHighlight() {
+    setSpanningResult(null);
+    setMstResult(null);
+    setMstError(null);
+    setTreeHighlight(null);
+  }
 
   useEffect(() => {
     const graph = activeGraphRef.current;
@@ -834,6 +919,188 @@ export function AnalysisPanel() {
           <p className="text-xs text-muted-foreground bg-muted/50 p-2 rounded-md">
             Grafo não ponderado: peso 1 por aresta. Ative "Ponderado" nas propriedades para usar pesos customizados.
           </p>
+        )}
+      </div>
+
+      <Separator />
+
+      <div className="space-y-3">
+        <h4 className="font-semibold text-sm flex items-center gap-2">
+          <TreePine className="h-4 w-4" />
+          Árvores
+        </h4>
+
+        <div className="grid grid-cols-2 gap-2">
+          <PropertyBadge label="É Árvore" value={treeAnalysis?.isTree} />
+          <PropertyBadge label="É Floresta" value={forestFlag} />
+        </div>
+
+        <div className="p-2 bg-muted/50 rounded-md space-y-1 text-xs">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Vértices (n):</span>
+            <span className="font-medium">{treeAnalysis?.vertexCount ?? 0}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Arestas (m):</span>
+            <span className="font-medium">{treeAnalysis?.edgeCount ?? 0}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Componentes:</span>
+            <span className="font-medium">{componentsCount}</span>
+          </div>
+          <div className="flex justify-between gap-2">
+            <span className="text-muted-foreground">Relação m × n:</span>
+            <span className="font-medium text-right">{treeAnalysis?.vertexEdgeRelation}</span>
+          </div>
+        </div>
+
+        {treeAnalysis?.isTree && (
+          <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-md space-y-1 text-xs">
+            <p className="font-medium text-amber-700 dark:text-amber-300">Estrutura da Árvore</p>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Folhas:</span>
+              <span className="font-medium">
+                {treeAnalysis.leafCount} ({treeAnalysis.leaves.map(getVertexLabel).join(", ")})
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Nós internos:</span>
+              <span className="font-medium">{treeAnalysis.internalCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Diâmetro:</span>
+              <span className="font-medium">{treeAnalysis.diameter}</span>
+            </div>
+            {treeAnalysis.diameterPath.length > 0 && (
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Caminho diâmetro:</span>
+                <span className="font-medium text-right font-mono">{treeAnalysis.diameterPath.map(getVertexLabel).join(" → ")}</span>
+              </div>
+            )}
+            {treeAnalysis.center.length > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Centro:</span>
+                <span className="font-medium">{treeAnalysis.center.map(getVertexLabel).join(", ")}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <Separator />
+
+      <div className="space-y-3">
+        <h4 className="font-semibold text-sm flex items-center gap-2">
+          <NetworkIcon className="h-4 w-4" />
+          Árvore Geradora (BFS)
+        </h4>
+        <p className="text-xs text-muted-foreground">Subgrafo conexo acíclico contendo todos os vértices do grafo.</p>
+
+        <div className="space-y-2">
+          <Label className="text-xs">Raiz</Label>
+          <div className="flex gap-2">
+            <Select value={spanningRoot} onValueChange={setSpanningRoot}>
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                {activeGraph.vertices.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>
+                    {v.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button size="sm" onClick={runSpanningTree} disabled={!spanningRoot}>
+              <Play className="h-4 w-4 mr-1" />
+              Gerar
+            </Button>
+          </div>
+        </div>
+
+        {spanningResult && (
+          <div
+            className={`p-2 rounded-md border space-y-1 ${spanningResult.isComplete ? "bg-amber-500/10 border-amber-500/30" : "bg-destructive/10 border-destructive/30"}`}
+          >
+            {spanningResult.isComplete ? (
+              <>
+                <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Árvore geradora encontrada</p>
+                <div className="flex gap-3 text-xs text-muted-foreground">
+                  <span>
+                    Arestas: <span className="font-medium text-foreground">{spanningResult.edges.length}</span>
+                  </span>
+                  <span>
+                    Vértices: <span className="font-medium text-foreground">{spanningResult.visited.length}</span>
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-xs font-medium text-destructive">Grafo desconexo — árvore geradora não existe</p>
+                <p className="text-xs text-muted-foreground">
+                  Apenas {spanningResult.visited.length} de {activeGraph.vertices.length} vértices alcançados.
+                </p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      <Separator />
+
+      <div className="space-y-3">
+        <h4 className="font-semibold text-sm flex items-center gap-2">
+          <TreePine className="h-4 w-4" />
+          AGM — Árvore Geradora Mínima
+        </h4>
+        <p className="text-xs text-muted-foreground">Algoritmo de Kruskal: encontra a árvore geradora com menor soma de pesos.</p>
+
+        <Button size="sm" className="w-full" onClick={runMST} disabled={activeGraph.directed || activeGraph.vertices.length === 0}>
+          <Play className="h-4 w-4 mr-2" />
+          Calcular AGM (Kruskal)
+        </Button>
+
+        {mstError && (
+          <div className="p-2 bg-destructive/10 border border-destructive/30 rounded-md">
+            <p className="text-xs text-destructive font-medium">{mstError}</p>
+          </div>
+        )}
+
+        {mstResult && (
+          <div
+            className={`p-2 rounded-md border space-y-1 ${mstResult.isComplete ? "bg-amber-500/10 border-amber-500/30" : "bg-destructive/10 border-destructive/30"}`}
+          >
+            {mstResult.isComplete ? (
+              <>
+                <p className="text-xs font-medium text-amber-700 dark:text-amber-300">AGM encontrada</p>
+                <div className="flex gap-3 text-xs text-muted-foreground">
+                  <span>
+                    Peso total: <span className="font-medium text-foreground">{mstResult.totalWeight}</span>
+                  </span>
+                  <span>
+                    Arestas: <span className="font-medium text-foreground">{mstResult.edges.length}</span>
+                  </span>
+                </div>
+                {!activeGraph.weighted && (
+                  <p className="text-xs text-muted-foreground">Grafo não ponderado: cada aresta vale 1.</p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-xs font-medium text-destructive">Grafo desconexo — AGM não existe</p>
+                <p className="text-xs text-muted-foreground">
+                  Apenas {mstResult.edges.length + 1} vértice(s) conectados via {mstResult.edges.length} aresta(s).
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
+        {(spanningResult || mstResult) && (
+          <Button size="sm" variant="outline" className="w-full" onClick={clearTreeHighlight}>
+            <Trash2 className="h-4 w-4 mr-2" />
+            Limpar destaque
+          </Button>
         )}
       </div>
     </div>
