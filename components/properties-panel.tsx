@@ -9,26 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Wand2, Palette, RotateCcw } from "lucide-react";
 import { useGraphStore } from "@/lib/graph-store";
-import { calculateChromaticNumber, CHROMATIC_COLORS } from "@/lib/graph-algorithms";
-
-const COLORS = [
-  "#6366f1",
-  "#8b5cf6",
-  "#a855f7",
-  "#d946ef",
-  "#ec4899",
-  "#f43f5e",
-  "#ef4444",
-  "#f97316",
-  "#f59e0b",
-  "#eab308",
-  "#84cc16",
-  "#22c55e",
-  "#10b981",
-  "#14b8a6",
-  "#06b6d4",
-  "#0ea5e9",
-];
+import { calculateChromaticNumber, CHROMATIC_COLORS, COLORS } from "@/lib/graph-algorithms";
 
 export function PropertiesPanel() {
   const { graphs, activeGraphId, selectedVertexIds, selectedEdgeIds, updateVertex, updateEdge, updateGraph, autoLabelVertices, autoLabelEdges } =
@@ -41,29 +22,38 @@ export function PropertiesPanel() {
   const [vertexLabel, setVertexLabel] = useState("");
   const [edgeLabel, setEdgeLabel] = useState("");
   const [edgeWeight, setEdgeWeight] = useState("");
-  const [chromaticResult, setChromaticResult] = useState<{ chromaticNumber: number; error?: string } | null>(null);
+  const [chromaticError, setChromaticError] = useState<string | null>(null);
+
+  const chromaticResult =
+    activeGraph?.chromaticNumber !== undefined ? { chromaticNumber: activeGraph.chromaticNumber, colors: activeGraph.chromaticColors || [] } : null;
 
   function applyChromaticColoring() {
     if (!activeGraph) return;
+    setChromaticError(null);
     const result = calculateChromaticNumber(activeGraph);
     if (!result) {
-      setChromaticResult({ chromaticNumber: 0, error: "Grafo contém laços — número cromático indefinido" });
+      setChromaticError("Grafo contém laços — número cromático indefinido");
+      updateGraph(activeGraph.id, { chromaticNumber: undefined, chromaticColors: undefined });
       return;
     }
+    const usedColors = new Set<string>();
     result.colorMap.forEach((colorIdx, vertexId) => {
       const color = CHROMATIC_COLORS[colorIdx % CHROMATIC_COLORS.length];
+      usedColors.add(color);
       updateVertex(vertexId, { color });
     });
-    setChromaticResult({ chromaticNumber: result.chromaticNumber });
+    updateGraph(activeGraph.id, { chromaticNumber: result.chromaticNumber, chromaticColors: Array.from(usedColors) });
   }
 
   function resetColoring() {
     if (!activeGraph) return;
+
     const defaultColor = activeGraph.defaultVertexColor || "#6366f1";
     activeGraph.vertices.forEach((v) => {
       updateVertex(v.id, { color: defaultColor });
     });
-    setChromaticResult(null);
+    updateGraph(activeGraph.id, { chromaticNumber: undefined, chromaticColors: undefined });
+    setChromaticError(null);
   }
 
   useEffect(() => {
@@ -107,6 +97,11 @@ export function PropertiesPanel() {
         <div className="flex flex-wrap gap-2">
           <Badge variant="secondary">{activeGraph.vertices.length} vértices</Badge>
           <Badge variant="secondary">{activeGraph.edges.length} arestas</Badge>
+          {chromaticResult && (
+            <Badge variant="default" className="bg-primary/20 text-primary border border-primary/40">
+              χ(G) = {chromaticResult.chromaticNumber}
+            </Badge>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -129,7 +124,13 @@ export function PropertiesPanel() {
           Calcula a quantidade mínima de cores para colorir vértices de modo que nenhum vértice adjacente compartilhe a mesma cor.
         </p>
         <div className="space-y-2">
-          <Button variant="default" size="sm" className="w-full" onClick={applyChromaticColoring} disabled={!activeGraph || activeGraph.vertices.length === 0}>
+          <Button
+            variant="default"
+            size="sm"
+            className="w-full"
+            onClick={applyChromaticColoring}
+            disabled={!activeGraph || activeGraph.vertices.length === 0}
+          >
             <Palette className="h-4 w-4 mr-2" />
             Calcular e Colorir
           </Button>
@@ -138,18 +139,36 @@ export function PropertiesPanel() {
             Resetar Cores
           </Button>
         </div>
-        {chromaticResult && (
-          <div className={`p-2 rounded-md border ${chromaticResult.error ? "bg-destructive/10 border-destructive/30" : "bg-primary/10 border-primary/30"}`}>
-            {chromaticResult.error ? (
-              <p className="text-xs text-destructive font-medium">{chromaticResult.error}</p>
-            ) : (
-              <div className="space-y-1">
-                <p className="text-xs font-medium">
-                  χ(G) = <span className="text-primary text-base font-bold">{chromaticResult.chromaticNumber}</span>
-                </p>
-                <p className="text-xs text-muted-foreground">{chromaticResult.chromaticNumber} cor(es) necessária(s) para colorir o grafo.</p>
+        {chromaticError && (
+          <div className="p-3 rounded-md border bg-destructive/10 border-destructive/30">
+            <p className="text-xs text-destructive font-medium">{chromaticError}</p>
+          </div>
+        )}
+        {chromaticResult && !chromaticError && (
+          <div className="p-3 rounded-md border bg-primary/10 border-primary/30">
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs text-muted-foreground">Número cromático</span>
+                <span className="text-2xl font-bold text-primary leading-none">{chromaticResult.chromaticNumber}</span>
               </div>
-            )}
+              <p className="text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">{chromaticResult.chromaticNumber}</span> cor(es) necessária(s) para colorir o grafo
+                sem conflitos.
+              </p>
+              {chromaticResult.colors.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Cores aplicadas:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {chromaticResult.colors.map((c, i) => (
+                      <div key={c} className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-background">
+                        <span className="inline-block w-3 h-3 rounded-full border border-border" style={{ backgroundColor: c }} />
+                        <span className="text-[10px] text-muted-foreground">#{i + 1}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
