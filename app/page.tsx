@@ -14,13 +14,9 @@ import {
   RotateCcw,
   Github,
   Linkedin,
-  PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
   PanelRightOpen,
   Download,
-  Menu,
-  Layers,
   ChevronUp,
   ChevronDown,
 } from "lucide-react";
@@ -31,7 +27,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { GraphCanvas, type GraphCanvasRef } from "@/components/graph-canvas";
 import { GraphToolbar } from "@/components/graph-toolbar";
 import { GraphManager } from "@/components/graph-manager";
@@ -62,8 +58,8 @@ export default function GraphSimulator() {
   const { setTool, tool, undo, redo, toggleGridSnap } = useGraphStore();
   const [zoom, setZoom] = useState(1);
   const canvasRef = useRef<GraphCanvasRef>(null);
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  const [leftOpen, setLeftOpen] = useState(false);
+  const [rightOpen, setRightOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("properties");
   const [toolsOverlayVisible, setToolsOverlayVisible] = useState(true);
   const isMobilePortrait = useIsMobilePortrait();
@@ -319,13 +315,19 @@ export default function GraphSimulator() {
           </div>
         </header>
 
-        <div className="flex flex-1 overflow-hidden">
-          {leftOpen && (
-            <aside className="w-60 border-r border-border bg-card hidden md:flex flex-col shrink-0 transition-all">
-              <GraphManager />
-            </aside>
-          )}
+        <Sheet open={leftOpen} onOpenChange={setLeftOpen}>
+          <SheetContent side="left" className="w-[85vw] max-w-xs p-0 flex flex-col">
+            <GraphManager />
+          </SheetContent>
+        </Sheet>
 
+        <Sheet open={rightOpen} onOpenChange={setRightOpen}>
+          <SheetContent side="right" className="w-[90vw] max-w-sm p-0 flex flex-col">
+            <RightPanelContent />
+          </SheetContent>
+        </Sheet>
+
+        <div className="flex flex-1 overflow-hidden">
           <main className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
             {isMobilePortrait && (
               <Button
@@ -342,23 +344,12 @@ export default function GraphSimulator() {
             <div className={toolsHeaderClassName}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-9 w-9 hidden md:flex shrink-0" onClick={() => setLeftOpen(!leftOpen)}>
-                    {leftOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+                  <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => setLeftOpen(true)}>
+                    <PanelLeftOpen className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>{leftOpen ? "Ocultar painel esquerdo" : "Mostrar painel esquerdo"}</TooltipContent>
+                <TooltipContent>Grafos</TooltipContent>
               </Tooltip>
-
-              <Sheet>
-                <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-10 w-10 md:hidden shrink-0">
-                    <Layers className="h-5 w-5" />
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="left" className="w-[85vw] max-w-sm p-0">
-                  <GraphManager />
-                </SheetContent>
-              </Sheet>
 
               <GraphToolbar />
 
@@ -430,23 +421,12 @@ export default function GraphSimulator() {
 
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 hidden lg:flex" onClick={() => setRightOpen(!rightOpen)}>
-                      {rightOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+                    <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setRightOpen(true)}>
+                      <PanelRightOpen className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>{rightOpen ? "Ocultar painel direito" : "Mostrar painel direito"}</TooltipContent>
+                  <TooltipContent>Propriedades</TooltipContent>
                 </Tooltip>
-
-                <Sheet>
-                  <SheetTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-10 w-10 lg:hidden">
-                      <Menu className="h-5 w-5" />
-                    </Button>
-                  </SheetTrigger>
-                  <SheetContent side="right" className="w-[90vw] max-w-sm p-0">
-                    <RightPanelContent />
-                  </SheetContent>
-                </Sheet>
               </div>
             </div>
 
@@ -454,12 +434,6 @@ export default function GraphSimulator() {
               <GraphCanvas ref={canvasRef} zoom={zoom} onZoomChange={setZoom} showAllGraphs={true} />
             </div>
           </main>
-
-          {rightOpen && (
-            <aside className="w-80 border-l border-border bg-card hidden lg:flex flex-col shrink-0 transition-all">
-              <RightPanelContent />
-            </aside>
-          )}
         </div>
       </div>
     </TooltipProvider>

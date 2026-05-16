@@ -36,6 +36,13 @@ export interface Graph {
 
 export type Tool = "select" | "vertex" | "edge" | "delete" | "pan";
 
+export interface GraphFolder {
+  id: string;
+  name: string;
+  graphIds: string[];
+  collapsed: boolean;
+}
+
 export interface HistorySnapshot {
   graphs: Graph[];
   activeGraphId: string | null;
@@ -43,6 +50,7 @@ export interface HistorySnapshot {
 
 export interface GraphState {
   graphs: Graph[];
+  folders: GraphFolder[];
   activeGraphId: string | null;
   selectedVertexIds: string[];
   selectedEdgeIds: string[];
