@@ -5,6 +5,8 @@ import { useGraphStore } from "@/lib/graph-store";
 import { useDijkstraStore } from "@/lib/dijkstra-store";
 import { useTreeStore } from "@/lib/tree-store";
 import { GRID_SIZE, type Vertex, type Edge, type Graph } from "@/lib/graph-types";
+import { computeGraphsBounds } from "@/core/domain/graph/graph-bounds";
+import { computeFitTransform } from "@/lib/viewport-fit";
 
 interface GraphCanvasProps {
   graphId?: string;
@@ -18,6 +20,7 @@ interface GraphCanvasProps {
 
 export interface GraphCanvasRef {
   resetView: () => void;
+  fitView: () => void;
   exportImage: (format: "png" | "jpeg") => void;
 }
 
@@ -89,6 +92,27 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         panRef.current = { x: 0, y: 0 };
         setZoom(1);
       },
+      fitView: () => {
+        const container = containerRef.current;
+        const viewport = {
+          width: container?.clientWidth ?? canvasSize.width,
+          height: container?.clientHeight ?? canvasSize.height,
+        };
+        if (viewport.width <= 0 || viewport.height <= 0) return;
+
+        const bounds = computeGraphsBounds(useGraphStore.getState().graphs);
+        if (!bounds) return;
+
+        const { zoom: nextZoom, pan: nextPan } = computeFitTransform(bounds, viewport, {
+          padding: 56,
+          minZoom: 0.1,
+          maxZoom: 3,
+        });
+
+        setPan(nextPan);
+        panRef.current = nextPan;
+        setZoom(nextZoom);
+      },
       exportImage: (format: "png" | "jpeg") => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -109,7 +133,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         link.click();
       },
     }),
-    [setZoom],
+    [setZoom, canvasSize],
   );
 
   const {

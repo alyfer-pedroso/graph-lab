@@ -10,16 +10,11 @@ import {
   GitCompare,
   HelpCircle,
   Keyboard,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
   Github,
   Linkedin,
   PanelLeftOpen,
   PanelRightOpen,
   Download,
-  ChevronUp,
-  ChevronDown,
   ArrowLeft,
   Pencil,
 } from "lucide-react";
@@ -27,21 +22,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
-import { Slider } from "@/components/ui/slider";
-import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { GraphCanvas, type GraphCanvasRef } from "@/components/graph-canvas";
-import { GraphToolbar } from "@/components/graph-toolbar";
 import { GraphManager } from "@/components/graph-manager";
 import { PropertiesPanel } from "@/components/properties-panel";
 import { MatrixPanel } from "@/components/matrix-panel";
 import { AnalysisPanel } from "@/components/analysis-panel";
 import { ComparisonPanel } from "@/components/comparison-panel";
 import { EmptyGraphState } from "@/components/simulator/empty-graph-state";
+import { FloatingToolbar } from "@/components/toolbar/floating-toolbar";
 import { RenameProjectDialog } from "@/components/home/rename-project-dialog";
 import { useGraphStore } from "@/lib/graph-store";
-import { useIsMobilePortrait } from "@/hooks/use-mobile-portrait";
 
 function ShortcutGroup({ title, items }: { title: string; items: [string, string][] }) {
   return (
@@ -66,26 +58,42 @@ interface GraphSimulatorProps {
 
 export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorProps) {
   const router = useRouter();
-  const { setTool, tool, undo, redo, toggleGridSnap, graphs, createGraph } = useGraphStore();
+  const { setTool, undo, redo, toggleGridSnap, graphs, createGraph } = useGraphStore();
   const [zoom, setZoom] = useState(1);
   const canvasRef = useRef<GraphCanvasRef>(null);
+  const canvasWrapperRef = useRef<HTMLDivElement>(null);
+  const didInitialFitRef = useRef(false);
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("properties");
-  const [toolsOverlayVisible, setToolsOverlayVisible] = useState(true);
   const [renameOpen, setRenameOpen] = useState(false);
-  const isMobilePortrait = useIsMobilePortrait();
 
   const isEmpty = graphs.length === 0;
 
-  const toolsHeaderClassName = isMobilePortrait
-    ? [
-        "absolute top-0 left-0 right-0 z-30 p-2 pr-14",
-        "border-b border-border bg-card/95 backdrop-blur shadow-md",
-        "flex items-center gap-2 flex-wrap transition-transform duration-200",
-        toolsOverlayVisible ? "translate-y-0" : "-translate-y-full",
-      ].join(" ")
-    : "p-2 border-b border-border flex items-center gap-2 shrink-0 flex-wrap";
+  const handleReset = () => canvasRef.current?.resetView();
+  const handleFitView = () => canvasRef.current?.fitView();
+
+  useEffect(() => {
+    if (didInitialFitRef.current) return;
+
+    let outerFrame = 0;
+    let innerFrame = 0;
+
+    outerFrame = requestAnimationFrame(() => {
+      innerFrame = requestAnimationFrame(() => {
+        const hasVertices = useGraphStore.getState().graphs.some((g) => g.vertices.length > 0);
+        if (hasVertices) {
+          canvasRef.current?.fitView();
+          didInitialFitRef.current = true;
+        }
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(outerFrame);
+      cancelAnimationFrame(innerFrame);
+    };
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -131,14 +139,6 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [setTool, undo, redo, toggleGridSnap]);
-
-  const toolLabel: Record<string, string> = {
-    select: "Selecionar",
-    vertex: "Vértice",
-    edge: "Aresta",
-    delete: "Excluir",
-    pan: "Mover",
-  };
 
   const RightPanelContent = () => (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
@@ -198,6 +198,20 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Projetos</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 sm:h-8 sm:w-8 shrink-0"
+                  onClick={() => setLeftOpen(true)}
+                  aria-label="Abrir painel de grafos"
+                >
+                  <PanelLeftOpen className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Grafos</TooltipContent>
             </Tooltip>
             <div className="p-1.5 rounded-md bg-primary/10 shrink-0">
               <Network className="h-4 w-4 text-primary" />
@@ -309,6 +323,13 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
                     </p>
                   </div>
                   <div>
+                    <h4 className="font-semibold mb-1">Barra de Ferramentas Flutuante</h4>
+                    <p className="text-muted-foreground">
+                      Arraste a alça da barra de ferramentas para reposicioná-la em qualquer canto ou borda lateral do canvas. Use o botão Ajustar à
+                      Tela para enquadrar todos os grafos automaticamente.
+                    </p>
+                  </div>
+                  <div>
                     <h4 className="font-semibold mb-1">Desfazer e Refazer</h4>
                     <p className="text-muted-foreground">
                       Use os botões da toolbar ou os atalhos Ctrl+Z para desfazer e Ctrl+Y para refazer.
@@ -323,8 +344,8 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
                   <div>
                     <h4 className="font-semibold mb-1">Gestos em Mobile</h4>
                     <p className="text-muted-foreground">
-                      Toque para selecionar, arraste para mover vértices e use dois dedos para aplicar zoom. Em modo retrato, use o botão flutuante
-                      para ocultar ou mostrar a barra de ferramentas e liberar espaço no canvas.
+                      Toque para selecionar, arraste para mover vértices e use dois dedos para aplicar zoom. Em modo retrato, a barra de ferramentas
+                      fica na vertical e pode ser arrastada para liberar espaço no canvas.
                     </p>
                   </div>
                   <div>
@@ -355,6 +376,21 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
                 </div>
               </DialogContent>
             </Dialog>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 sm:h-8 sm:w-8"
+                  onClick={() => setRightOpen(true)}
+                  aria-label="Abrir painel de propriedades"
+                >
+                  <PanelRightOpen className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Propriedades</TooltipContent>
+            </Tooltip>
           </div>
         </header>
 
@@ -372,110 +408,16 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
 
         <div className="flex flex-1 overflow-hidden">
           <main className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
-            {isMobilePortrait && (
-              <Button
-                variant="secondary"
-                size="icon"
-                onClick={() => setToolsOverlayVisible((v) => !v)}
-                className="absolute top-2 right-2 z-40 h-10 w-10 rounded-full shadow-md border border-border"
-                aria-label={toolsOverlayVisible ? "Ocultar ferramentas" : "Mostrar ferramentas"}
-                aria-expanded={toolsOverlayVisible}
-              >
-                {toolsOverlayVisible ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </Button>
-            )}
-            <div className={toolsHeaderClassName}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => setLeftOpen(true)}>
-                    <PanelLeftOpen className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Grafos</TooltipContent>
-              </Tooltip>
-
-              <GraphToolbar />
-
-              <div className="flex items-center gap-1 ml-auto shrink-0 flex-wrap">
-                <div className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground border-r border-border pr-2 mr-1">
-                  <span>Ferramenta:</span>
-                  <span className="font-medium text-foreground">{toolLabel[tool] || tool}</span>
-                </div>
-
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 sm:h-8 sm:w-8"
-                      onClick={() => setZoom(Math.max(0.1, zoom - 0.1))}
-                    >
-                      <ZoomOut className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Diminuir Zoom</TooltipContent>
-                </Tooltip>
-
-                <div className="hidden sm:flex items-center gap-1">
-                  <Slider value={[zoom * 100]} min={10} max={300} step={10} onValueChange={([val]) => setZoom(val / 100)} className="w-16" />
-                  <Input
-                    type="number"
-                    value={Math.round(zoom * 100)}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value);
-                      if (!isNaN(val)) setZoom(Math.max(0.1, Math.min(3, val / 100)));
-                    }}
-                    className="w-14 h-7 text-xs text-center [&::-webkit-outer-spin-button]:hidden [&::-webkit-inner-spin-button]:hidden"
-                    min={10}
-                    max={300}
-                  />
-                  <span className="text-xs text-muted-foreground">%</span>
-                </div>
-
-                <span className="sm:hidden text-xs text-muted-foreground tabular-nums w-10 text-center">{Math.round(zoom * 100)}%</span>
-
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 sm:h-8 sm:w-8"
-                      onClick={() => setZoom(Math.min(3, zoom + 0.1))}
-                    >
-                      <ZoomIn className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Aumentar Zoom</TooltipContent>
-                </Tooltip>
-
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 sm:h-8 sm:w-8"
-                      onClick={() => canvasRef.current?.resetView()}
-                    >
-                      <RotateCcw className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Resetar Vista</TooltipContent>
-                </Tooltip>
-
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setRightOpen(true)}>
-                      <PanelRightOpen className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Propriedades</TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-
-            <div className="flex-1 p-1.5 sm:p-4 overflow-hidden relative">
+            <div ref={canvasWrapperRef} className="flex-1 p-1.5 sm:p-4 overflow-hidden relative">
               <GraphCanvas ref={canvasRef} zoom={zoom} onZoomChange={setZoom} showAllGraphs={true} />
               {isEmpty && <EmptyGraphState onCreate={() => createGraph()} />}
+              <FloatingToolbar
+                containerRef={canvasWrapperRef}
+                zoom={zoom}
+                onZoomChange={setZoom}
+                onReset={handleReset}
+                onFitView={handleFitView}
+              />
             </div>
           </main>
         </div>

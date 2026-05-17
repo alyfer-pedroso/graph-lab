@@ -1,6 +1,7 @@
 export const PROJECT_INDEX_KEY = "graphlab:index";
 export const MIGRATION_SENTINEL_KEY = "graphlab:migrated";
 export const LEGACY_STORAGE_KEY = "graphlab-storage";
+export const TOOLBAR_PREFS_KEY = "graphlab:toolbar";
 export const PROJECT_INDEX_VERSION = 1;
 
 export function projectPayloadKey(id: string): string {
