@@ -1,32 +1,12 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
 import type { Graph, Vertex, Edge, Tool, GraphState, GraphFolder, HistorySnapshot } from "./graph-types";
 import { HISTORY_LIMIT } from "./graph-types";
+import type { ProjectPayload } from "@/core/domain/project/project.entity";
+import { getGraphDefaultColor } from "@/core/domain/graph/graph-color";
 import { generateVertexLabel, generateEdgeLabel } from "./graph-algorithms";
 
 function generateId(): string {
   return Math.random().toString(36).substring(2, 11);
-}
-
-const GRAPH_COLORS = ["#6366f1", "#22c55e", "#f59e0b", "#ec4899", "#06b6d4", "#f97316", "#a855f7", "#14b8a6", "#ef4444", "#3b82f6"];
-
-function getGraphDefaultColor(graphIndex: number): string {
-  return GRAPH_COLORS[graphIndex % GRAPH_COLORS.length];
-}
-
-function createDefaultGraph(): Graph {
-  return {
-    id: generateId(),
-    name: "Grafo 1",
-    vertices: [],
-    edges: [],
-    directed: false,
-    weighted: false,
-    opacity: 1,
-    visible: true,
-    offsetX: 0,
-    offsetY: 0,
-  };
 }
 
 interface GraphStore extends GraphState {
@@ -36,8 +16,8 @@ interface GraphStore extends GraphState {
   updateGraph: (id: string, updates: Partial<Graph>) => void;
   duplicateGraph: (id: string) => string;
   clearGraph: (id: string) => void;
-  importGraph: (graphData: Omit<Graph, "id"> & { id?: string }) => string;
-  resetAllGraphs: () => void;
+  clearWorkspace: () => void;
+  loadFromProject: (payload: ProjectPayload) => void;
 
   createFolder: (name: string) => string;
   deleteFolder: (id: string, deleteGraphs?: boolean) => void;
@@ -95,8 +75,6 @@ interface GraphStore extends GraphState {
   getCompareGraph: () => Graph | null;
 }
 
-const initialGraph = createDefaultGraph();
-
 function takeSnapshot(state: { graphs: Graph[]; activeGraphId: string | null }): HistorySnapshot {
   return { graphs: state.graphs, activeGraphId: state.activeGraphId };
 }
@@ -108,22 +86,20 @@ function withHistory(state: { graphs: Graph[]; activeGraphId: string | null; pas
   };
 }
 
-export const useGraphStore = create<GraphStore>()(
-  persist(
-    (set, get) => ({
-      graphs: [initialGraph],
-      folders: [],
-      activeGraphId: initialGraph.id,
-      selectedVertexIds: [],
-      selectedEdgeIds: [],
-      tool: "select",
-      isCreatingEdge: false,
-      edgeSourceId: null,
-      compareMode: false,
-      compareGraphId: null,
-      gridSnap: true,
-      past: [],
-      future: [],
+export const useGraphStore = create<GraphStore>()((set, get) => ({
+  graphs: [],
+  folders: [],
+  activeGraphId: null,
+  selectedVertexIds: [],
+  selectedEdgeIds: [],
+  tool: "select",
+  isCreatingEdge: false,
+  edgeSourceId: null,
+  compareMode: false,
+  compareGraphId: null,
+  gridSnap: true,
+  past: [],
+  future: [],
 
       createGraph: (name, directed = false, weighted = false) => {
         const id = generateId();
@@ -150,45 +126,37 @@ export const useGraphStore = create<GraphStore>()(
         return id;
       },
 
-      importGraph: (graphData) => {
-        const id = graphData.id || generateId();
-        const currentGraphs = get().graphs;
-        const graphIndex = currentGraphs.length;
-        const newGraph: Graph = {
-          id,
-          name: graphData.name || `Grafo importado`,
-          vertices: graphData.vertices || [],
-          edges: graphData.edges || [],
-          directed: graphData.directed ?? false,
-          weighted: graphData.weighted ?? false,
-          opacity: graphData.opacity ?? 1,
-          visible: graphData.visible ?? true,
-          offsetX: graphData.offsetX ?? 0,
-          offsetY: graphData.offsetY ?? 0,
-          defaultVertexColor: graphData.defaultVertexColor || getGraphDefaultColor(graphIndex),
-        };
-        const safeId = currentGraphs.some((g) => g.id === id) ? generateId() : id;
-        newGraph.id = safeId;
-        set((state) => ({
-          ...withHistory(state),
-          graphs: [...state.graphs, newGraph],
-          activeGraphId: safeId,
-        }));
-        return safeId;
-      },
-
-      resetAllGraphs: () => {
-        const defaultGraph = createDefaultGraph();
-        set((state) => ({
-          ...withHistory(state),
-          graphs: [defaultGraph],
-          activeGraphId: defaultGraph.id,
+      clearWorkspace: () => {
+        set({
+          graphs: [],
+          folders: [],
+          activeGraphId: null,
           selectedVertexIds: [],
           selectedEdgeIds: [],
+          compareMode: false,
           compareGraphId: null,
           isCreatingEdge: false,
           edgeSourceId: null,
-        }));
+          past: [],
+          future: [],
+        });
+      },
+
+      loadFromProject: (payload) => {
+        set({
+          graphs: payload.graphs,
+          folders: payload.folders,
+          activeGraphId: payload.activeGraphId,
+          gridSnap: payload.gridSnap,
+          selectedVertexIds: [],
+          selectedEdgeIds: [],
+          compareMode: false,
+          compareGraphId: null,
+          isCreatingEdge: false,
+          edgeSourceId: null,
+          past: [],
+          future: [],
+        });
       },
 
       deleteGraph: (id) => {
@@ -196,21 +164,12 @@ export const useGraphStore = create<GraphStore>()(
           const history = withHistory(state);
           const newGraphs = state.graphs.filter((g) => g.id !== id);
           const newFolders = state.folders.map((f) => ({ ...f, graphIds: f.graphIds.filter((gid) => gid !== id) }));
-          if (newGraphs.length === 0) {
-            const defaultGraph = createDefaultGraph();
-            return {
-              ...history,
-              graphs: [defaultGraph],
-              folders: newFolders,
-              activeGraphId: defaultGraph.id,
-              compareGraphId: null,
-            };
-          }
           return {
             ...history,
             graphs: newGraphs,
             folders: newFolders,
-            activeGraphId: state.activeGraphId === id ? newGraphs[0].id : state.activeGraphId,
+            activeGraphId:
+              state.activeGraphId === id ? (newGraphs.length > 0 ? newGraphs[0].id : null) : state.activeGraphId,
             compareGraphId: state.compareGraphId === id ? null : state.compareGraphId,
           };
         });
@@ -536,12 +495,13 @@ export const useGraphStore = create<GraphStore>()(
           if (!deleteGraphs) return { folders: newFolders };
           const graphIdsToDelete = new Set(folder.graphIds);
           const newGraphs = state.graphs.filter((g) => !graphIdsToDelete.has(g.id));
-          const fallback = newGraphs.length === 0 ? [createDefaultGraph()] : newGraphs;
           return {
             ...withHistory(state),
-            graphs: fallback,
+            graphs: newGraphs,
             folders: newFolders,
-            activeGraphId: graphIdsToDelete.has(state.activeGraphId ?? "") ? fallback[0].id : state.activeGraphId,
+            activeGraphId: graphIdsToDelete.has(state.activeGraphId ?? "")
+              ? newGraphs[0]?.id ?? null
+              : state.activeGraphId,
           };
         });
       },
@@ -788,16 +748,4 @@ export const useGraphStore = create<GraphStore>()(
         const state = get();
         return state.graphs.find((g) => g.id === state.compareGraphId) || null;
       },
-    }),
-    {
-      name: "graphlab-storage",
-      storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        graphs: state.graphs,
-        folders: state.folders,
-        activeGraphId: state.activeGraphId,
-        gridSnap: state.gridSnap,
-      }),
-    },
-  ),
-);
+}));

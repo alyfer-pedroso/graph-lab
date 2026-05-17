@@ -42,7 +42,7 @@ export function ComparisonPanel() {
   }, [compareGraph]);
 
   if (!activeGraph) {
-    return <div className="p-4 text-center text-muted-foreground text-sm">Nenhum grafo selecionado</div>;
+    return <div className="p-4 text-center text-muted-foreground text-sm">Crie seu primeiro grafo para começar.</div>;
   }
 
   const otherGraphs = graphs.filter((g) => g.id !== activeGraphId);

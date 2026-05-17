@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import {
   Plus,
   Copy,
@@ -10,10 +10,6 @@ import {
   Eye,
   EyeOff,
   Move,
-  Upload,
-  Download as DownloadIcon,
-  RotateCcw,
-  PackageOpen,
   FolderPlus,
   Folder,
   FolderOpen,
@@ -97,7 +93,6 @@ function SortableGraphItem({
   onDuplicate,
   onRename,
   onResetOffset,
-  onExport,
   onDelete,
   onSetOpacity,
   onMoveToFolder,
@@ -113,7 +108,6 @@ function SortableGraphItem({
   onDuplicate: () => void;
   onRename: () => void;
   onResetOffset: () => void;
-  onExport: () => void;
   onDelete: () => void;
   onSetOpacity: (v: number) => void;
   onMoveToFolder: (folderId: string) => void;
@@ -219,11 +213,6 @@ function SortableGraphItem({
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={onExport}>
-                <DownloadIcon className="h-4 w-4 mr-2" />
-                Exportar (.json)
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
               <DropdownMenuItem className="text-destructive" onClick={onDelete}>
                 <Trash2 className="h-4 w-4 mr-2" />
                 Excluir
@@ -257,7 +246,6 @@ function SortableFolderItem({
   isDragTarget,
   onToggleCollapse,
   onRename,
-  onExport,
   onDeleteRequest,
   graphCallbacks,
 }: {
@@ -268,7 +256,6 @@ function SortableFolderItem({
   isDragTarget: boolean;
   onToggleCollapse: () => void;
   onRename: () => void;
-  onExport: () => void;
   onDeleteRequest: () => void;
   graphCallbacks: GraphCallbacks;
 }) {
@@ -320,10 +307,6 @@ function SortableFolderItem({
               <Settings className="h-4 w-4 mr-2" />
               Renomear pasta
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onExport} disabled={folderGraphs.length === 0}>
-              <DownloadIcon className="h-4 w-4 mr-2" />
-              Exportar pasta (.json)
-            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive" onClick={onDeleteRequest}>
               <Trash2 className="h-4 w-4 mr-2" />
@@ -349,7 +332,6 @@ function SortableFolderItem({
                 onDuplicate={() => graphCallbacks.duplicate(graph.id)}
                 onRename={() => graphCallbacks.rename(graph.id, graph.name)}
                 onResetOffset={() => graphCallbacks.resetOffset(graph.id)}
-                onExport={() => graphCallbacks.export(graph)}
                 onDelete={() => graphCallbacks.delete(graph.id)}
                 onSetOpacity={(v) => graphCallbacks.setOpacity(graph.id, v)}
                 onMoveToFolder={(fid) => graphCallbacks.moveToFolder(graph.id, fid)}
@@ -370,7 +352,6 @@ interface GraphCallbacks {
   duplicate: (id: string) => void;
   rename: (id: string, current: string) => void;
   resetOffset: (id: string) => void;
-  export: (graph: Graph) => void;
   delete: (id: string) => void;
   setOpacity: (id: string, v: number) => void;
   moveToFolder: (graphId: string, folderId: string) => void;
@@ -390,8 +371,6 @@ export function GraphManager() {
     setGraphOpacity,
     setGraphVisible,
     setGraphOffset,
-    importGraph,
-    resetAllGraphs,
     createFolder,
     deleteFolder,
     renameFolder,
@@ -409,17 +388,12 @@ export function GraphManager() {
   const [newGraphDirected, setNewGraphDirected] = useState(false);
   const [newGraphWeighted, setNewGraphWeighted] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
   const [deleteFolderState, setDeleteFolderState] = useState<{ id: string; name: string } | null>(null);
 
   const [activeItem, setActiveItem] = useState<{ type: "folder" | "graph"; id: string } | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
-
-  const importInputRef = useRef<HTMLInputElement>(null);
-  const importAllInputRef = useRef<HTMLInputElement>(null);
 
   const graphsInFolders = new Set(folders.flatMap((f) => f.graphIds));
   const standaloneGraphs = graphs.filter((g) => !graphsInFolders.has(g.id));
@@ -515,137 +489,11 @@ export function GraphManager() {
       if (n) updateGraph(id, { name: n });
     },
     resetOffset: (id) => setGraphOffset(id, 0, 0),
-    export: exportGraph,
     delete: deleteGraph,
     setOpacity: (id, v) => setGraphOpacity(id, v),
     moveToFolder: (graphId, folderId) => addGraphToFolder(graphId, folderId),
     removeFromFolder: (graphId) => removeGraphFromFolder(graphId),
   };
-
-  function serializeGraph(graph: Graph) {
-    return {
-      id: graph.id,
-      name: graph.name,
-      directed: graph.directed,
-      weighted: graph.weighted,
-      opacity: graph.opacity,
-      visible: graph.visible,
-      offsetX: graph.offsetX,
-      offsetY: graph.offsetY,
-      defaultVertexColor: graph.defaultVertexColor,
-      vertices: graph.vertices.map((v) => ({ id: v.id, label: v.label, x: v.x, y: v.y, color: v.color })),
-      edges: graph.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, label: e.label, weight: e.weight, directed: e.directed })),
-    };
-  }
-
-  function downloadJson(data: unknown, filename: string) {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function exportGraph(graph: Graph) {
-    downloadJson({ version: "1.0", graph: serializeGraph(graph) }, `${graph.name.replace(/\s+/g, "_")}.graphlab.json`);
-  }
-
-  function exportAllGraphs() {
-    downloadJson(
-      { version: "1.0", exportedAt: new Date().toISOString(), graphs: graphs.map(serializeGraph) },
-      `graphlab_todos_grafos_${new Date().toISOString().slice(0, 10)}.json`,
-    );
-  }
-
-  function exportFolder(folder: GraphFolder) {
-    const folderGraphs = folder.graphIds.map(getGraphById).filter(Boolean) as Graph[];
-    downloadJson(
-      { version: "1.0", exportedAt: new Date().toISOString(), folderName: folder.name, graphs: folderGraphs.map(serializeGraph) },
-      `pasta_${folder.name.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.json`,
-    );
-  }
-
-  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const parsed = JSON.parse(ev.target?.result as string);
-        let gd: any = parsed.version && parsed.graph ? parsed.graph : parsed.vertices !== undefined ? parsed : null;
-        if (!gd) throw new Error("Formato inválido.");
-        importGraph({
-          name: gd.name || file.name.replace(/\.(graphlab\.)?json$/, ""),
-          directed: gd.directed ?? false,
-          weighted: gd.weighted ?? false,
-          opacity: gd.opacity ?? 1,
-          visible: gd.visible ?? true,
-          offsetX: gd.offsetX ?? 0,
-          offsetY: gd.offsetY ?? 0,
-          defaultVertexColor: gd.defaultVertexColor,
-          vertices: (gd.vertices || []).map((v: any) => ({ id: v.id, label: v.label, x: v.x, y: v.y, color: v.color })),
-          edges: (gd.edges || []).map((e: any) => ({
-            id: e.id,
-            source: e.source,
-            target: e.target,
-            label: e.label,
-            weight: e.weight,
-            directed: e.directed ?? gd.directed ?? false,
-          })),
-        });
-        setImportError(null);
-      } catch (err: any) {
-        setImportError(err.message || "Erro ao importar.");
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  }
-
-  function handleImportAllFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const parsed = JSON.parse(ev.target?.result as string);
-        if (!parsed.version || !Array.isArray(parsed.graphs)) throw new Error("Formato inválido.");
-        let count = 0;
-        for (const gd of parsed.graphs) {
-          try {
-            importGraph({
-              name: gd.name || `Grafo importado ${count + 1}`,
-              directed: gd.directed ?? false,
-              weighted: gd.weighted ?? false,
-              opacity: gd.opacity ?? 1,
-              visible: gd.visible ?? true,
-              offsetX: gd.offsetX ?? 0,
-              offsetY: gd.offsetY ?? 0,
-              defaultVertexColor: gd.defaultVertexColor,
-              vertices: (gd.vertices || []).map((v: any) => ({ id: v.id, label: v.label, x: v.x, y: v.y, color: v.color })),
-              edges: (gd.edges || []).map((e: any) => ({
-                id: e.id,
-                source: e.source,
-                target: e.target,
-                label: e.label,
-                weight: e.weight,
-                directed: e.directed ?? gd.directed ?? false,
-              })),
-            });
-            count++;
-          } catch {}
-        }
-        if (count === 0) setImportError("Nenhum grafo válido encontrado.");
-        else setImportError(null);
-      } catch (err: any) {
-        setImportError(err.message || "Erro ao importar.");
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  }
 
   function handleCreateGraph() {
     if (!newGraphName.trim()) return;
@@ -681,71 +529,6 @@ export function GraphManager() {
         <div className="flex items-center justify-between p-3 border-b border-border">
           <h3 className="font-semibold text-sm">Grafos</h3>
           <div className="flex items-center gap-1 pr-8 md:pr-0">
-            <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
-              <DialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="Resetar tudo">
-                  <RotateCcw className="h-4 w-4" />
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Resetar o sistema</DialogTitle>
-                  <DialogDescription>
-                    Isso irá apagar <strong>todos os grafos</strong> e começar do zero.
-                  </DialogDescription>
-                </DialogHeader>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setResetDialogOpen(false)}>
-                    Cancelar
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={() => {
-                      resetAllGraphs();
-                      setResetDialogOpen(false);
-                    }}
-                  >
-                    Resetar tudo
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-
-            <input ref={importInputRef} type="file" accept=".json,.graphlab.json" className="hidden" onChange={handleImportFile} />
-            <input ref={importAllInputRef} type="file" accept=".json" className="hidden" onChange={handleImportAllFile} />
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7" title="Importar/Exportar">
-                  <PackageOpen className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={exportAllGraphs}>
-                  <DownloadIcon className="h-4 w-4 mr-2" />
-                  Exportar todos os grafos
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    setImportError(null);
-                    importInputRef.current?.click();
-                  }}
-                >
-                  <Upload className="h-4 w-4 mr-2" />
-                  Importar um grafo
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    setImportError(null);
-                    importAllInputRef.current?.click();
-                  }}
-                >
-                  <Upload className="h-4 w-4 mr-2" />
-                  Importar múltiplos grafos
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
             <Dialog open={folderDialogOpen} onOpenChange={setFolderDialogOpen}>
               <DialogTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-7 w-7" title="Nova pasta">
@@ -814,12 +597,6 @@ export function GraphManager() {
           </div>
         </div>
 
-        {importError && (
-          <div className="mx-2 mt-2 p-2 bg-destructive/10 border border-destructive/30 rounded-md">
-            <p className="text-xs text-destructive">{importError}</p>
-          </div>
-        )}
-
         <ScrollArea className="flex-1">
           <div className="p-2 space-y-1">
             <SortableContext items={folderDndIds} strategy={verticalListSortingStrategy}>
@@ -836,7 +613,6 @@ export function GraphManager() {
                     const n = prompt("Novo nome:", folder.name);
                     if (n) renameFolder(folder.id, n);
                   }}
-                  onExport={() => exportFolder(folder)}
                   onDeleteRequest={() => setDeleteFolderState({ id: folder.id, name: folder.name })}
                   graphCallbacks={graphCallbacks}
                 />
@@ -863,7 +639,6 @@ export function GraphManager() {
                   onDuplicate={() => graphCallbacks.duplicate(graph.id)}
                   onRename={() => graphCallbacks.rename(graph.id, graph.name)}
                   onResetOffset={() => graphCallbacks.resetOffset(graph.id)}
-                  onExport={() => graphCallbacks.export(graph)}
                   onDelete={() => graphCallbacks.delete(graph.id)}
                   onSetOpacity={(v) => graphCallbacks.setOpacity(graph.id, v)}
                   onMoveToFolder={(fid) => graphCallbacks.moveToFolder(graph.id, fid)}
@@ -871,6 +646,12 @@ export function GraphManager() {
                 />
               ))}
             </SortableContext>
+
+            {graphs.length === 0 && folders.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-8 px-2">
+                Nenhum grafo neste projeto. Crie seu primeiro grafo para começar.
+              </p>
+            )}
           </div>
         </ScrollArea>
 
@@ -891,7 +672,7 @@ export function GraphManager() {
       <Dialog open={!!deleteFolderState} onOpenChange={(o) => !o && setDeleteFolderState(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Excluir pasta "{deleteFolderState?.name}"</DialogTitle>
+            <DialogTitle>Excluir pasta &quot;{deleteFolderState?.name}&quot;</DialogTitle>
             <DialogDescription>O que deseja fazer com os grafos dentro desta pasta?</DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-col sm:flex-row gap-2">

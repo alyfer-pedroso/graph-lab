@@ -30,9 +30,6 @@ export function GraphToolbar() {
   const { tool, setTool, clearGraph, activeGraphId, gridSnap, toggleGridSnap, autoLayout, undo, redo, past, future, getActiveGraph } =
     useGraphStore();
 
-  // Defer store-derived disabled states to the client to prevent SSR/hydration
-  // mismatch: Zustand's persist middleware rehydrates synchronously from
-  // localStorage before React's first paint on the client.
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
@@ -40,6 +37,7 @@ export function GraphToolbar() {
   const canAutoLayout = (activeGraph?.vertices.length ?? 0) >= 2;
   const canUndoNow = mounted && past.length > 0;
   const canRedoNow = mounted && future.length > 0;
+  const canClear = mounted && !!activeGraphId;
 
   return (
     <TooltipProvider>
@@ -119,7 +117,12 @@ export function GraphToolbar() {
           <Tooltip>
             <TooltipTrigger asChild>
               <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive hover:text-destructive">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={!canClear}
+                  className="h-9 w-9 text-destructive hover:text-destructive"
+                >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </AlertDialogTrigger>
