@@ -95,7 +95,7 @@ export function MatrixPanel() {
   if (!activeGraph || activeGraph.vertices.length === 0) {
     return (
       <div className="p-4 text-center text-muted-foreground text-sm">
-        {!activeGraph ? "Nenhum grafo selecionado" : "Adicione vértices para ver as matrizes"}
+        {!activeGraph ? "Crie seu primeiro grafo para começar." : "Adicione vértices para ver as matrizes"}
       </div>
     );
   }

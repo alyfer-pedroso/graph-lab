@@ -1,7 +1,38 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { Plus, Copy, Trash2, Settings, GitBranch, Eye, EyeOff, Move, Upload, Download as DownloadIcon, RotateCcw, PackageOpen } from "lucide-react";
+import { useState } from "react";
+import {
+  Plus,
+  Copy,
+  Trash2,
+  Settings,
+  GitBranch,
+  Eye,
+  EyeOff,
+  Move,
+  FolderPlus,
+  Folder,
+  FolderOpen,
+  ChevronRight,
+  ChevronDown,
+  FolderMinus,
+  FolderInput,
+  GripVertical,
+} from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragStartEvent,
+  type DragEndEvent,
+  type DragOverEvent,
+} from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,14 +40,328 @@ import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+} from "@/components/ui/dropdown-menu";
 import { useGraphStore } from "@/lib/graph-store";
 import { cn } from "@/lib/utils";
-import type { Graph } from "@/lib/graph-types";
+import type { Graph, GraphFolder } from "@/lib/graph-types";
+
+const FOLDER_PREFIX = "folder:";
+const GRAPH_PREFIX = "graph:";
+const toDndId = (type: "folder" | "graph", id: string) => (type === "folder" ? `${FOLDER_PREFIX}${id}` : `${GRAPH_PREFIX}${id}`);
+const fromDndId = (dndId: string): { type: "folder" | "graph"; id: string } | null => {
+  if (dndId.startsWith(FOLDER_PREFIX)) return { type: "folder", id: dndId.slice(FOLDER_PREFIX.length) };
+  if (dndId.startsWith(GRAPH_PREFIX)) return { type: "graph", id: dndId.slice(GRAPH_PREFIX.length) };
+  return null;
+};
+
+function GraphGhost({ graph }: { graph: Graph }) {
+  return (
+    <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-card border border-primary shadow-lg opacity-90 text-sm font-medium pointer-events-none">
+      <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      <GitBranch className="h-4 w-4 shrink-0" />
+      <span className="truncate">{graph.name}</span>
+    </div>
+  );
+}
+
+function FolderGhost({ folder }: { folder: GraphFolder }) {
+  return (
+    <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-card border border-primary shadow-lg opacity-90 text-sm font-medium pointer-events-none">
+      <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      <Folder className="h-4 w-4 shrink-0" />
+      <span className="truncate">{folder.name}</span>
+    </div>
+  );
+}
+
+function SortableGraphItem({
+  graph,
+  indented,
+  folders,
+  activeGraphId,
+  onSetActive,
+  onSetVisible,
+  onDuplicate,
+  onRename,
+  onResetOffset,
+  onDelete,
+  onSetOpacity,
+  onMoveToFolder,
+  onRemoveFromFolder,
+  isInFolder,
+}: {
+  graph: Graph;
+  indented: boolean;
+  folders: GraphFolder[];
+  activeGraphId: string | null;
+  onSetActive: () => void;
+  onSetVisible: () => void;
+  onDuplicate: () => void;
+  onRename: () => void;
+  onResetOffset: () => void;
+  onDelete: () => void;
+  onSetOpacity: (v: number) => void;
+  onMoveToFolder: (folderId: string) => void;
+  onRemoveFromFolder: () => void;
+  isInFolder: boolean;
+}) {
+  const dndId = toDndId("graph", graph.id);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: dndId });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.3 : 1,
+  };
+
+  const isActive = activeGraphId === graph.id;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "group flex flex-col gap-1 p-2 rounded-md cursor-pointer transition-colors border",
+        indented && "ml-4 border-l-2 border-l-border rounded-l-none",
+        isActive ? "bg-primary/10 text-primary border-primary/30" : "hover:bg-muted border-transparent",
+      )}
+      onClick={onSetActive}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1 min-w-0">
+          <span
+            {...attributes}
+            {...listeners}
+            className="cursor-grab active:cursor-grabbing touch-none p-0.5 rounded hover:bg-muted/60 shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
+          </span>
+          <GitBranch className="h-4 w-4 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium truncate">{graph.name}</p>
+            <p className="text-xs text-muted-foreground">
+              {graph.vertices.length}V, {graph.edges.length}A{graph.directed && " · Dígrafo"}
+              {graph.weighted && " · Pond."}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSetVisible();
+            }}
+            title={graph.visible ? "Ocultar" : "Mostrar"}
+          >
+            {graph.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />}
+          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => e.stopPropagation()}>
+                <Settings className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onDuplicate}>
+                <Copy className="h-4 w-4 mr-2" />
+                Duplicar
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onRename}>
+                <Settings className="h-4 w-4 mr-2" />
+                Renomear
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onResetOffset}>
+                <Move className="h-4 w-4 mr-2" />
+                Resetar posição
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {folders.length > 0 && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <FolderInput className="h-4 w-4 mr-2" />
+                    Mover para pasta
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {folders.map((f) => (
+                      <DropdownMenuItem key={f.id} onClick={() => onMoveToFolder(f.id)}>
+                        <Folder className="h-4 w-4 mr-2" />
+                        {f.name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              )}
+              {isInFolder && (
+                <DropdownMenuItem onClick={onRemoveFromFolder}>
+                  <FolderMinus className="h-4 w-4 mr-2" />
+                  Remover da pasta
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Excluir
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      <div className={cn("px-1 space-y-1", isActive ? "block" : "hidden group-hover:block")} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">Opacidade</span>
+          <span className="text-xs text-muted-foreground">{Math.round(graph.opacity * 100)}%</span>
+        </div>
+        <Slider value={[graph.opacity * 100]} min={0} max={100} step={5} onValueChange={([val]) => onSetOpacity(val / 100)} className="w-full" />
+        {(graph.offsetX !== 0 || graph.offsetY !== 0) && (
+          <p className="text-xs text-muted-foreground">
+            Offset: ({Math.round(graph.offsetX)}, {Math.round(graph.offsetY)})
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SortableFolderItem({
+  folder,
+  graphs,
+  folders,
+  activeGraphId,
+  isDragTarget,
+  onToggleCollapse,
+  onRename,
+  onDeleteRequest,
+  graphCallbacks,
+}: {
+  folder: GraphFolder;
+  graphs: Graph[];
+  folders: GraphFolder[];
+  activeGraphId: string | null;
+  isDragTarget: boolean;
+  onToggleCollapse: () => void;
+  onRename: () => void;
+  onDeleteRequest: () => void;
+  graphCallbacks: GraphCallbacks;
+}) {
+  const dndId = toDndId("folder", folder.id);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: dndId });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.3 : 1,
+  };
+
+  const folderGraphs = folder.graphIds.map((id) => graphs.find((g) => g.id === id)).filter(Boolean) as Graph[];
+  const innerIds = folderGraphs.map((g) => toDndId("graph", g.id));
+
+  return (
+    <div ref={setNodeRef} style={style} className="space-y-0.5">
+      <div
+        className={cn(
+          "flex items-center gap-1 px-1 py-1.5 rounded-md transition-colors group",
+          isDragTarget ? "bg-primary/10 ring-1 ring-primary/40" : "hover:bg-muted",
+        )}
+      >
+        <span {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing touch-none p-0.5 rounded hover:bg-muted/60 shrink-0">
+          <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
+        </span>
+
+        <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={onToggleCollapse}>
+          {folder.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </Button>
+
+        {folder.collapsed ? (
+          <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+        )}
+
+        <span className="text-sm font-medium flex-1 truncate">{folder.name}</span>
+        <span className="text-xs text-muted-foreground shrink-0">{folderGraphs.length}</span>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Settings className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={onRename}>
+              <Settings className="h-4 w-4 mr-2" />
+              Renomear pasta
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-destructive" onClick={onDeleteRequest}>
+              <Trash2 className="h-4 w-4 mr-2" />
+              Excluir pasta
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {!folder.collapsed && (
+        <SortableContext items={innerIds} strategy={verticalListSortingStrategy}>
+          <div className="space-y-0.5">
+            {folderGraphs.map((graph) => (
+              <SortableGraphItem
+                key={graph.id}
+                graph={graph}
+                indented
+                folders={folders}
+                activeGraphId={activeGraphId}
+                isInFolder
+                onSetActive={() => graphCallbacks.setActive(graph.id)}
+                onSetVisible={() => graphCallbacks.setVisible(graph.id, !graph.visible)}
+                onDuplicate={() => graphCallbacks.duplicate(graph.id)}
+                onRename={() => graphCallbacks.rename(graph.id, graph.name)}
+                onResetOffset={() => graphCallbacks.resetOffset(graph.id)}
+                onDelete={() => graphCallbacks.delete(graph.id)}
+                onSetOpacity={(v) => graphCallbacks.setOpacity(graph.id, v)}
+                onMoveToFolder={(fid) => graphCallbacks.moveToFolder(graph.id, fid)}
+                onRemoveFromFolder={() => graphCallbacks.removeFromFolder(graph.id)}
+              />
+            ))}
+            {folderGraphs.length === 0 && <p className="text-xs text-muted-foreground ml-8 py-1 italic">Arraste grafos aqui</p>}
+          </div>
+        </SortableContext>
+      )}
+    </div>
+  );
+}
+
+interface GraphCallbacks {
+  setActive: (id: string) => void;
+  setVisible: (id: string, v: boolean) => void;
+  duplicate: (id: string) => void;
+  rename: (id: string, current: string) => void;
+  resetOffset: (id: string) => void;
+  delete: (id: string) => void;
+  setOpacity: (id: string, v: number) => void;
+  moveToFolder: (graphId: string, folderId: string) => void;
+  removeFromFolder: (graphId: string) => void;
+}
 
 export function GraphManager() {
   const {
     graphs,
+    folders,
     activeGraphId,
     createGraph,
     deleteGraph,
@@ -26,403 +371,339 @@ export function GraphManager() {
     setGraphOpacity,
     setGraphVisible,
     setGraphOffset,
-    importGraph,
-    resetAllGraphs,
+    createFolder,
+    deleteFolder,
+    renameFolder,
+    addGraphToFolder,
+    removeGraphFromFolder,
+    toggleFolderCollapsed,
+    reorderFolders,
+    reorderGraphsInFolder,
+    reorderStandaloneGraphs,
+    moveGraphToFolder,
+    moveGraphToRoot,
   } = useGraphStore();
 
   const [newGraphName, setNewGraphName] = useState("");
   const [newGraphDirected, setNewGraphDirected] = useState(false);
   const [newGraphWeighted, setNewGraphWeighted] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [resetDialogOpen, setResetDialogOpen] = useState(false);
-  const importInputRef = useRef<HTMLInputElement>(null);
-  const importAllInputRef = useRef<HTMLInputElement>(null);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [deleteFolderState, setDeleteFolderState] = useState<{ id: string; name: string } | null>(null);
 
-  function handleCreateGraph() {
-    if (newGraphName.trim()) {
-      createGraph(newGraphName.trim(), newGraphDirected, newGraphWeighted);
-      setNewGraphName("");
-      setNewGraphDirected(false);
-      setNewGraphWeighted(false);
-      setDialogOpen(false);
+  const [activeItem, setActiveItem] = useState<{ type: "folder" | "graph"; id: string } | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+
+  const graphsInFolders = new Set(folders.flatMap((f) => f.graphIds));
+  const standaloneGraphs = graphs.filter((g) => !graphsInFolders.has(g.id));
+
+  const getGraphById = (id: string) => graphs.find((g) => g.id === id);
+  const getFolderOfGraph = (graphId: string) => folders.find((f) => f.graphIds.includes(graphId)) ?? null;
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragStart(event: DragStartEvent) {
+    const parsed = fromDndId(String(event.active.id));
+    if (parsed) setActiveItem(parsed);
+    setDragOverFolderId(null);
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const { over } = event;
+    if (!over) {
+      setDragOverFolderId(null);
+      return;
+    }
+    const overParsed = fromDndId(String(over.id));
+    if (overParsed?.type === "folder") {
+      setDragOverFolderId(overParsed.id);
+    } else if (overParsed?.type === "graph") {
+      const folder = getFolderOfGraph(overParsed.id);
+      setDragOverFolderId(folder?.id ?? null);
+    } else {
+      setDragOverFolderId(null);
     }
   }
 
-  function exportGraph(graph: Graph) {
-    const exportData = {
-      version: "1.0",
-      graph: {
-        id: graph.id,
-        name: graph.name,
-        directed: graph.directed,
-        weighted: graph.weighted,
-        opacity: graph.opacity,
-        visible: graph.visible,
-        offsetX: graph.offsetX,
-        offsetY: graph.offsetY,
-        defaultVertexColor: graph.defaultVertexColor,
-        vertices: graph.vertices.map((v) => ({ id: v.id, label: v.label, x: v.x, y: v.y, color: v.color })),
-        edges: graph.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, label: e.label, weight: e.weight, directed: e.directed })),
-      },
-    };
-    const json = JSON.stringify(exportData, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${graph.name.replace(/\s+/g, "_")}.graphlab.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveItem(null);
+    setDragOverFolderId(null);
 
-  function exportAllGraphs() {
-    const exportData = {
-      version: "1.0",
-      exportedAt: new Date().toISOString(),
-      graphs: graphs.map((graph) => ({
-        id: graph.id,
-        name: graph.name,
-        directed: graph.directed,
-        weighted: graph.weighted,
-        opacity: graph.opacity,
-        visible: graph.visible,
-        offsetX: graph.offsetX,
-        offsetY: graph.offsetY,
-        defaultVertexColor: graph.defaultVertexColor,
-        vertices: graph.vertices.map((v) => ({ id: v.id, label: v.label, x: v.x, y: v.y, color: v.color })),
-        edges: graph.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, label: e.label, weight: e.weight, directed: e.directed })),
-      })),
-    };
-    const json = JSON.stringify(exportData, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `graphlab_todos_grafos_${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
 
-  function handleReset() {
-    resetAllGraphs();
-    setResetDialogOpen(false);
-  }
+    const activeParsed = fromDndId(String(active.id));
+    const overParsed = fromDndId(String(over.id));
+    if (!activeParsed || !overParsed) return;
 
-  function handleImportClick() {
-    setImportError(null);
-    importInputRef.current?.click();
-  }
+    if (activeParsed.type === "folder" && overParsed.type === "folder") {
+      reorderFolders(activeParsed.id, overParsed.id);
+      return;
+    }
 
-  function handleImportAllClick() {
-    setImportError(null);
-    importAllInputRef.current?.click();
-  }
+    if (activeParsed.type === "graph") {
+      const graphId = activeParsed.id;
+      const fromFolder = getFolderOfGraph(graphId);
 
-  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const raw = ev.target?.result as string;
-        const parsed = JSON.parse(raw);
-        let graphData: any = null;
-        if (parsed.version && parsed.graph) {
-          graphData = parsed.graph;
-        } else if (parsed.vertices !== undefined && parsed.edges !== undefined) {
-          graphData = parsed;
-        } else {
-          throw new Error("Formato inválido. Use um arquivo exportado pelo GraphLab (.graphlab.json).");
-        }
-        importGraph({
-          name: graphData.name || file.name.replace(/\.graphlab\.json$/, "").replace(/\.json$/, ""),
-          directed: graphData.directed ?? false,
-          weighted: graphData.weighted ?? false,
-          opacity: graphData.opacity ?? 1,
-          visible: graphData.visible ?? true,
-          offsetX: graphData.offsetX ?? 0,
-          offsetY: graphData.offsetY ?? 0,
-          defaultVertexColor: graphData.defaultVertexColor,
-          vertices: (graphData.vertices || []).map((v: any) => ({ id: v.id, label: v.label, x: v.x, y: v.y, color: v.color })),
-          edges: (graphData.edges || []).map((e: any) => ({
-            id: e.id,
-            source: e.source,
-            target: e.target,
-            label: e.label,
-            weight: e.weight,
-            directed: e.directed ?? graphData.directed ?? false,
-          })),
-        });
-        setImportError(null);
-      } catch (err: any) {
-        setImportError(err.message || "Erro ao importar o arquivo.");
+      if (overParsed.type === "folder") {
+        moveGraphToFolder(graphId, overParsed.id, null);
+        return;
       }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  }
 
-  function handleImportAllFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const raw = ev.target?.result as string;
-        const parsed = JSON.parse(raw);
+      if (overParsed.type === "graph") {
+        const toFolder = getFolderOfGraph(overParsed.id);
 
-        if (parsed.version && parsed.graphs && Array.isArray(parsed.graphs)) {
-          let importedCount = 0;
-          for (const graphData of parsed.graphs) {
-            try {
-              importGraph({
-                name: graphData.name || `Grafo importado ${importedCount + 1}`,
-                directed: graphData.directed ?? false,
-                weighted: graphData.weighted ?? false,
-                opacity: graphData.opacity ?? 1,
-                visible: graphData.visible ?? true,
-                offsetX: graphData.offsetX ?? 0,
-                offsetY: graphData.offsetY ?? 0,
-                defaultVertexColor: graphData.defaultVertexColor,
-                vertices: (graphData.vertices || []).map((v: any) => ({ id: v.id, label: v.label, x: v.x, y: v.y, color: v.color })),
-                edges: (graphData.edges || []).map((e: any) => ({
-                  id: e.id,
-                  source: e.source,
-                  target: e.target,
-                  label: e.label,
-                  weight: e.weight,
-                  directed: e.directed ?? graphData.directed ?? false,
-                })),
-              });
-              importedCount++;
-            } catch {}
-          }
-          setImportError(null);
-          if (importedCount === 0) {
-            setImportError("Nenhum grafo válido encontrado no arquivo.");
-          }
-        } else {
-          throw new Error("Formato inválido. Use um arquivo de exportação múltipla do GraphLab.");
+        if (fromFolder && toFolder && fromFolder.id === toFolder.id) {
+          reorderGraphsInFolder(fromFolder.id, graphId, overParsed.id);
+          return;
         }
-      } catch (err: any) {
-        setImportError(err.message || "Erro ao importar o arquivo.");
+
+        if (toFolder) {
+          moveGraphToFolder(graphId, toFolder.id, overParsed.id);
+          return;
+        }
+
+        if (!toFolder) {
+          if (fromFolder) {
+            moveGraphToRoot(graphId);
+            reorderStandaloneGraphs(graphId, overParsed.id);
+          } else {
+            reorderStandaloneGraphs(graphId, overParsed.id);
+          }
+          return;
+        }
       }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+    }
   }
+
+  const graphCallbacks: GraphCallbacks = {
+    setActive: setActiveGraph,
+    setVisible: (id, v) => setGraphVisible(id, v),
+    duplicate: duplicateGraph,
+    rename: (id, current) => {
+      const n = prompt("Novo nome:", current);
+      if (n) updateGraph(id, { name: n });
+    },
+    resetOffset: (id) => setGraphOffset(id, 0, 0),
+    delete: deleteGraph,
+    setOpacity: (id, v) => setGraphOpacity(id, v),
+    moveToFolder: (graphId, folderId) => addGraphToFolder(graphId, folderId),
+    removeFromFolder: (graphId) => removeGraphFromFolder(graphId),
+  };
+
+  function handleCreateGraph() {
+    if (!newGraphName.trim()) return;
+    createGraph(newGraphName.trim(), newGraphDirected, newGraphWeighted);
+    setNewGraphName("");
+    setNewGraphDirected(false);
+    setNewGraphWeighted(false);
+    setDialogOpen(false);
+  }
+
+  function handleCreateFolder() {
+    if (!newFolderName.trim()) return;
+    createFolder(newFolderName.trim());
+    setNewFolderName("");
+    setFolderDialogOpen(false);
+  }
+
+  const folderDndIds = folders.map((f) => toDndId("folder", f.id));
+  const standaloneDndIds = standaloneGraphs.map((g) => toDndId("graph", g.id));
+
+  const activeGraph = activeItem?.type === "graph" ? getGraphById(activeItem.id) : null;
+  const activeFolder = activeItem?.type === "folder" ? folders.find((f) => f.id === activeItem.id) : null;
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between p-3 border-b border-border">
-        <h3 className="font-semibold text-sm">Grafos</h3>
-        <div className="flex items-center gap-1 pr-8 md:pr-0">
-          <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="Resetar tudo">
-                <RotateCcw className="h-4 w-4" />
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Resetar o sistema</DialogTitle>
-                <DialogDescription>
-                  Isso irá apagar <strong>todos os grafos</strong> e começar do zero. Esta ação não pode ser desfeita.
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setResetDialogOpen(false)}>
-                  Cancelar
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="flex flex-col h-full">
+        <div className="flex items-center justify-between p-3 border-b border-border">
+          <h3 className="font-semibold text-sm">Grafos</h3>
+          <div className="flex items-center gap-1 pr-8 md:pr-0">
+            <Dialog open={folderDialogOpen} onOpenChange={setFolderDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7" title="Nova pasta">
+                  <FolderPlus className="h-4 w-4" />
                 </Button>
-                <Button variant="destructive" onClick={handleReset}>
-                  Resetar tudo
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <input ref={importInputRef} type="file" accept=".json,.graphlab.json" className="hidden" onChange={handleImportFile} />
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7" title="Exportar/Importar todos os grafos">
-                <PackageOpen className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={exportAllGraphs} title="Exportar todos os grafos">
-                <DownloadIcon className="h-4 w-4 mr-2" />
-                Exportar todos os grafos
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleImportClick} title="Importar arquivo com um único grafo (.json)">
-                <Upload className="h-4 w-4 mr-2" />
-                Importar arquivo com um único grafo
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleImportAllClick} title="Importar arquivo com múltiplos grafos (.json)">
-                <Upload className="h-4 w-4 mr-2" />
-                Importar arquivo com múltiplos grafos
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <input ref={importAllInputRef} type="file" accept=".json" className="hidden" onChange={handleImportAllFile} />
-
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7">
-                <Plus className="h-4 w-4" />
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Novo Grafo</DialogTitle>
-                <DialogDescription>Configure as propriedades do novo grafo.</DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="name">Nome</Label>
-                  <Input
-                    id="name"
-                    value={newGraphName}
-                    onChange={(e) => setNewGraphName(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleCreateGraph()}
-                    placeholder="Meu Grafo"
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="directed">Dígrafo (Direcionado)</Label>
-                  <Switch id="directed" checked={newGraphDirected} onCheckedChange={setNewGraphDirected} />
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="weighted">Ponderado</Label>
-                  <Switch id="weighted" checked={newGraphWeighted} onCheckedChange={setNewGraphWeighted} />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button onClick={handleCreateGraph}>Criar</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
-
-      {importError && (
-        <div className="mx-2 mt-2 p-2 bg-destructive/10 border border-destructive/30 rounded-md">
-          <p className="text-xs text-destructive">{importError}</p>
-        </div>
-      )}
-
-      <ScrollArea className="flex-1">
-        <div className="p-2 space-y-1">
-          {graphs.map((graph) => (
-            <div
-              key={graph.id}
-              className={cn(
-                "group flex flex-col gap-1 p-2 rounded-md cursor-pointer transition-colors border",
-                activeGraphId === graph.id ? "bg-primary/10 text-primary border-primary/30" : "hover:bg-muted border-transparent",
-              )}
-              onClick={() => setActiveGraph(graph.id)}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 min-w-0">
-                  <GitBranch className="h-4 w-4 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{graph.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {graph.vertices.length}V, {graph.edges.length}A{graph.directed && " · Dígrafo"}
-                      {graph.weighted && " · Pond."}
-                    </p>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Nova Pasta</DialogTitle>
+                  <DialogDescription>Organize seus grafos em pastas.</DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="folder-name">Nome da pasta</Label>
+                    <Input
+                      id="folder-name"
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleCreateFolder()}
+                      placeholder="Minha Pasta"
+                    />
                   </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setGraphVisible(graph.id, !graph.visible);
-                    }}
-                    title={graph.visible ? "Ocultar grafo" : "Mostrar grafo"}
-                  >
-                    {graph.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />}
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => e.stopPropagation()}>
-                        <Settings className="h-3.5 w-3.5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => duplicateGraph(graph.id)}>
-                        <Copy className="h-4 w-4 mr-2" />
-                        Duplicar
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          const n = prompt("Novo nome:", graph.name);
-                          if (n) updateGraph(graph.id, { name: n });
-                        }}
-                      >
-                        <Settings className="h-4 w-4 mr-2" />
-                        Renomear
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setGraphOffset(graph.id, 0, 0)}>
-                        <Move className="h-4 w-4 mr-2" />
-                        Resetar posição
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          exportGraph(graph);
-                        }}
-                      >
-                        <DownloadIcon className="h-4 w-4 mr-2" />
-                        Exportar grafo (.json)
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive" onClick={() => deleteGraph(graph.id)}>
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Excluir
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
+                <DialogFooter>
+                  <Button onClick={handleCreateFolder}>Criar</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
-              <div
-                className={cn("px-1 space-y-1", activeGraphId === graph.id ? "block" : "hidden group-hover:block")}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Opacidade</span>
-                  <span className="text-xs text-muted-foreground">{Math.round(graph.opacity * 100)}%</span>
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Novo Grafo</DialogTitle>
+                  <DialogDescription>Configure as propriedades do novo grafo.</DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="name">Nome</Label>
+                    <Input
+                      id="name"
+                      value={newGraphName}
+                      onChange={(e) => setNewGraphName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleCreateGraph()}
+                      placeholder="Meu Grafo"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="directed">Dígrafo (Direcionado)</Label>
+                    <Switch id="directed" checked={newGraphDirected} onCheckedChange={setNewGraphDirected} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="weighted">Ponderado</Label>
+                    <Switch id="weighted" checked={newGraphWeighted} onCheckedChange={setNewGraphWeighted} />
+                  </div>
                 </div>
-                <Slider
-                  value={[graph.opacity * 100]}
-                  min={0}
-                  max={100}
-                  step={5}
-                  onValueChange={([val]) => setGraphOpacity(graph.id, val / 100)}
-                  className="w-full"
-                />
-                {(graph.offsetX !== 0 || graph.offsetY !== 0) && (
-                  <p className="text-xs text-muted-foreground">
-                    Offset: ({Math.round(graph.offsetX)}, {Math.round(graph.offsetY)})
-                  </p>
-                )}
-              </div>
-            </div>
-          ))}
+                <DialogFooter>
+                  <Button onClick={handleCreateGraph}>Criar</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
-      </ScrollArea>
 
-      <div className="px-3 py-2 border-t border-border">
-        <p className="text-xs text-muted-foreground text-center">
-          {graphs.length} grafo{graphs.length !== 1 ? "s" : ""} · Auto-salvo no navegador
-        </p>
+        <ScrollArea className="flex-1">
+          <div className="p-2 space-y-1">
+            <SortableContext items={folderDndIds} strategy={verticalListSortingStrategy}>
+              {folders.map((folder) => (
+                <SortableFolderItem
+                  key={folder.id}
+                  folder={folder}
+                  graphs={graphs}
+                  folders={folders}
+                  activeGraphId={activeGraphId}
+                  isDragTarget={dragOverFolderId === folder.id}
+                  onToggleCollapse={() => toggleFolderCollapsed(folder.id)}
+                  onRename={() => {
+                    const n = prompt("Novo nome:", folder.name);
+                    if (n) renameFolder(folder.id, n);
+                  }}
+                  onDeleteRequest={() => setDeleteFolderState({ id: folder.id, name: folder.name })}
+                  graphCallbacks={graphCallbacks}
+                />
+              ))}
+            </SortableContext>
+
+            {standaloneGraphs.length > 0 && folders.length > 0 && (
+              <div className="pt-1">
+                <p className="text-xs text-muted-foreground px-2 pb-1 font-medium">Sem pasta</p>
+              </div>
+            )}
+
+            <SortableContext items={standaloneDndIds} strategy={verticalListSortingStrategy}>
+              {standaloneGraphs.map((graph) => (
+                <SortableGraphItem
+                  key={graph.id}
+                  graph={graph}
+                  indented={false}
+                  folders={folders}
+                  activeGraphId={activeGraphId}
+                  isInFolder={false}
+                  onSetActive={() => graphCallbacks.setActive(graph.id)}
+                  onSetVisible={() => graphCallbacks.setVisible(graph.id, !graph.visible)}
+                  onDuplicate={() => graphCallbacks.duplicate(graph.id)}
+                  onRename={() => graphCallbacks.rename(graph.id, graph.name)}
+                  onResetOffset={() => graphCallbacks.resetOffset(graph.id)}
+                  onDelete={() => graphCallbacks.delete(graph.id)}
+                  onSetOpacity={(v) => graphCallbacks.setOpacity(graph.id, v)}
+                  onMoveToFolder={(fid) => graphCallbacks.moveToFolder(graph.id, fid)}
+                  onRemoveFromFolder={() => graphCallbacks.removeFromFolder(graph.id)}
+                />
+              ))}
+            </SortableContext>
+
+            {graphs.length === 0 && folders.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-8 px-2">
+                Nenhum grafo neste projeto. Crie seu primeiro grafo para começar.
+              </p>
+            )}
+          </div>
+        </ScrollArea>
+
+        <div className="px-3 py-2 border-t border-border">
+          <p className="text-xs text-muted-foreground text-center">
+            {graphs.length} grafo{graphs.length !== 1 ? "s" : ""}
+            {folders.length > 0 && ` · ${folders.length} pasta${folders.length !== 1 ? "s" : ""}`}
+            {" · "}Auto-salvo
+          </p>
+        </div>
       </div>
-    </div>
+
+      <DragOverlay dropAnimation={null}>
+        {activeGraph && <GraphGhost graph={activeGraph} />}
+        {activeFolder && <FolderGhost folder={activeFolder} />}
+      </DragOverlay>
+
+      <Dialog open={!!deleteFolderState} onOpenChange={(o) => !o && setDeleteFolderState(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir pasta &quot;{deleteFolderState?.name}&quot;</DialogTitle>
+            <DialogDescription>O que deseja fazer com os grafos dentro desta pasta?</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setDeleteFolderState(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (deleteFolderState) {
+                  deleteFolder(deleteFolderState.id, false);
+                  setDeleteFolderState(null);
+                }
+              }}
+            >
+              Manter grafos
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (deleteFolderState) {
+                  deleteFolder(deleteFolderState.id, true);
+                  setDeleteFolderState(null);
+                }
+              }}
+            >
+              Excluir tudo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </DndContext>
   );
 }
