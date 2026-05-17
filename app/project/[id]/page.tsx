@@ -42,6 +42,7 @@ export default function ProjectPage() {
 
   return (
     <GraphSimulator
+      key={projectId}
       projectName={projectName}
       onRenameProject={(name) => {
         renameProject(projectId, name);

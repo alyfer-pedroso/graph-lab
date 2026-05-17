@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useGraphStore } from "@/lib/graph-store";
 import type { Tool } from "@/lib/graph-types";
+import { cn } from "@/lib/utils";
 
 const tools: { id: Tool; icon: React.ElementType; label: string; shortcut: string }[] = [
   { id: "select", icon: MousePointer2, label: "Selecionar", shortcut: "V" },
@@ -26,12 +27,19 @@ const tools: { id: Tool; icon: React.ElementType; label: string; shortcut: strin
   { id: "pan", icon: Move, label: "Mover Canvas", shortcut: "H" },
 ];
 
-export function GraphToolbar() {
+interface GraphToolbarProps {
+  orientation?: "horizontal" | "vertical";
+  tooltipSide?: "top" | "bottom" | "left" | "right";
+}
+
+export function GraphToolbar({ orientation = "horizontal", tooltipSide = "bottom" }: GraphToolbarProps) {
   const { tool, setTool, clearGraph, activeGraphId, gridSnap, toggleGridSnap, autoLayout, undo, redo, past, future, getActiveGraph } =
     useGraphStore();
 
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const activeGraph = mounted ? getActiveGraph() : null;
   const canAutoLayout = (activeGraph?.vertices.length ?? 0) >= 2;
@@ -39,9 +47,12 @@ export function GraphToolbar() {
   const canRedoNow = mounted && future.length > 0;
   const canClear = mounted && !!activeGraphId;
 
+  const isVertical = orientation === "vertical";
+  const dividerClassName = cn("bg-border", isVertical ? "h-px w-6 my-1" : "w-px h-6 mx-1");
+
   return (
     <TooltipProvider>
-      <div className="flex items-center gap-1 p-1.5 sm:p-2 bg-card border border-border rounded-lg flex-wrap">
+      <div className={cn("flex items-center gap-1", isVertical ? "flex-col" : "flex-row flex-wrap")}>
         {tools.map((t) => (
           <Tooltip key={t.id}>
             <TooltipTrigger asChild>
@@ -55,7 +66,7 @@ export function GraphToolbar() {
                 <t.icon className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>
+            <TooltipContent side={tooltipSide}>
               <p>
                 {t.label} ({t.shortcut})
               </p>
@@ -63,7 +74,7 @@ export function GraphToolbar() {
           </Tooltip>
         ))}
 
-        <div className="w-px h-6 bg-border mx-1" />
+        <div className={dividerClassName} />
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -71,7 +82,7 @@ export function GraphToolbar() {
               <Undo2 className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>
+          <TooltipContent side={tooltipSide}>
             <p>Desfazer (Ctrl+Z)</p>
           </TooltipContent>
         </Tooltip>
@@ -82,12 +93,12 @@ export function GraphToolbar() {
               <Redo2 className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>
+          <TooltipContent side={tooltipSide}>
             <p>Refazer (Ctrl+Y)</p>
           </TooltipContent>
         </Tooltip>
 
-        <div className="w-px h-6 bg-border mx-1" />
+        <div className={dividerClassName} />
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -95,7 +106,7 @@ export function GraphToolbar() {
               <Magnet className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>
+          <TooltipContent side={tooltipSide}>
             <p>{gridSnap ? "Desativar Snap à Grade" : "Ativar Snap à Grade"}</p>
           </TooltipContent>
         </Tooltip>
@@ -106,12 +117,12 @@ export function GraphToolbar() {
               <Wand2 className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>
+          <TooltipContent side={tooltipSide}>
             <p>Organizar Layout Automaticamente</p>
           </TooltipContent>
         </Tooltip>
 
-        <div className="w-px h-6 bg-border mx-1" />
+        <div className={dividerClassName} />
 
         <AlertDialog>
           <Tooltip>
@@ -127,7 +138,7 @@ export function GraphToolbar() {
                 </Button>
               </AlertDialogTrigger>
             </TooltipTrigger>
-            <TooltipContent>
+            <TooltipContent side={tooltipSide}>
               <p>Limpar Grafo</p>
             </TooltipContent>
           </Tooltip>
