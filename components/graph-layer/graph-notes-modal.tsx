@@ -43,19 +43,19 @@ export function GraphNotesModal({ graphId, graphName, initialNotes, open, onOpen
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg w-full">
         <DialogHeader>
-          <DialogTitle className="truncate">{graphName} — Notes</DialogTitle>
+          <DialogTitle className="truncate">{graphName} — Observações</DialogTitle>
         </DialogHeader>
         <Textarea
           value={localNotes}
           onChange={(e) => setLocalNotes(e.target.value)}
-          placeholder="Add observations about this graph..."
-          className="min-h-[200px] resize-none text-sm"
+          placeholder="Adicione observações sobre este grafo..."
+          className="min-h-50 resize-none text-sm"
         />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            Cancelar
           </Button>
-          <Button onClick={handleSave}>Save</Button>
+          <Button onClick={handleSave}>Salvar</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

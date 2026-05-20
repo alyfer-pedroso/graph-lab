@@ -53,6 +53,7 @@ export function GraphLayersOverlay({ viewportRef }: GraphLayersOverlayProps) {
             key={graph.id}
             graph={graph}
             isActive={graph.id === activeGraphId}
+            viewportRef={viewportRef}
             onSelect={() => setActiveGraph(graph.id)}
             onOpenNotes={() => setNotesGraphId(graph.id)}
           />
