@@ -4,10 +4,11 @@ import { useRef, type MutableRefObject } from "react";
 import { Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Graph } from "@/lib/graph-types";
-import { computeSingleGraphBounds } from "@/core/domain/graph/graph-bounds";
+import { computeSingleGraphBounds, VERTEX_RADIUS } from "@/core/domain/graph/graph-bounds";
 import { useGraphStore } from "@/lib/graph-store";
 
 const TITLE_HEIGHT = 24;
+const CONTAINER_PADDING = VERTEX_RADIUS + 8;
 
 interface GraphLayerContainerProps {
   graph: Graph;
@@ -24,7 +25,7 @@ export function GraphLayerContainer({ graph, isActive, viewportRef, onSelect, on
   const hasDragged = useRef(false);
   const historyPushed = useRef(false);
 
-  const bounds = computeSingleGraphBounds(graph);
+  const bounds = computeSingleGraphBounds(graph, CONTAINER_PADDING, CONTAINER_PADDING, CONTAINER_PADDING);
   if (!bounds) return null;
 
   const left = graph.offsetX + bounds.minX;
@@ -69,11 +70,7 @@ export function GraphLayerContainer({ graph, isActive, viewportRef, onSelect, on
     if (!hasDragged.current) onSelect();
   }
 
-  const titleBarCursor = isSelectTool
-    ? hasDragged.current
-      ? "grabbing"
-      : "grab"
-    : "pointer";
+  const titleBarCursor = isSelectTool ? (hasDragged.current ? "grabbing" : "grab") : "pointer";
 
   return (
     <div
@@ -108,14 +105,7 @@ export function GraphLayerContainer({ graph, isActive, viewportRef, onSelect, on
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
-        <span
-          className={cn(
-            "text-[11px] font-medium truncate leading-none",
-            isActive ? "text-primary/90" : "text-white/50",
-          )}
-        >
-          {graph.name}
-        </span>
+        <span className={cn("text-[11px] font-medium truncate leading-none", isActive ? "text-primary/90" : "text-white/50")}>{graph.name}</span>
 
         <button
           style={{ pointerEvents: "auto" }}
