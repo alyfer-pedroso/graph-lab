@@ -32,6 +32,7 @@ export interface Graph {
 
   chromaticNumber?: number;
   chromaticColors?: string[];
+  notes?: string;
 }
 
 export type Tool = "select" | "vertex" | "edge" | "delete" | "pan";

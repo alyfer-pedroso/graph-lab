@@ -40,3 +40,28 @@ export function computeGraphsBounds(graphs: Graph[], padding: number = VERTEX_RA
     maxY: maxY + padding,
   };
 }
+
+export function computeSingleGraphBounds(
+  graph: Graph,
+  padding: number = VERTEX_RADIUS,
+  maxPaddingX?: number,
+  maxPaddingY?: number,
+): GraphBounds | null {
+  if (graph.vertices.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const v of graph.vertices) {
+    if (v.x < minX) minX = v.x;
+    if (v.y < minY) minY = v.y;
+    if (v.x > maxX) maxX = v.x;
+    if (v.y > maxY) maxY = v.y;
+  }
+  return {
+    minX: minX - padding,
+    minY: minY - padding,
+    maxX: maxX + padding + (maxPaddingX ?? 0),
+    maxY: maxY + padding + (maxPaddingX ?? 0),
+  };
+}

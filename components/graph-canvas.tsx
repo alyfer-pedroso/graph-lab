@@ -1,11 +1,11 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from "react";
+import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle, type MutableRefObject } from "react";
 import { useGraphStore } from "@/lib/graph-store";
 import { useDijkstraStore } from "@/lib/dijkstra-store";
 import { useTreeStore } from "@/lib/tree-store";
 import { GRID_SIZE, type Vertex, type Edge, type Graph } from "@/lib/graph-types";
-import { computeGraphsBounds } from "@/core/domain/graph/graph-bounds";
+import { computeGraphsBounds, VERTEX_RADIUS } from "@/core/domain/graph/graph-bounds";
 import { computeFitTransform } from "@/lib/viewport-fit";
 
 interface GraphCanvasProps {
@@ -16,6 +16,7 @@ interface GraphCanvasProps {
   zoom?: number;
   onZoomChange?: (zoom: number) => void;
   showAllGraphs?: boolean;
+  viewportRef?: MutableRefObject<{ pan: { x: number; y: number }; zoom: number }>;
 }
 
 export interface GraphCanvasRef {
@@ -25,7 +26,7 @@ export interface GraphCanvasRef {
 }
 
 export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphCanvas(
-  { graphId, readOnly = false, width = 800, height = 600, zoom: externalZoom, onZoomChange, showAllGraphs = false },
+  { graphId, readOnly = false, width = 800, height = 600, zoom: externalZoom, onZoomChange, showAllGraphs = false, viewportRef },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -46,8 +47,9 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       setInternalZoom(clampedZoom);
       zoomRef.current = clampedZoom;
       onZoomChange?.(clampedZoom);
+      if (viewportRef) viewportRef.current = { pan: panRef.current, zoom: clampedZoom };
     },
-    [onZoomChange],
+    [onZoomChange, viewportRef],
   );
 
   useEffect(() => {
@@ -156,6 +158,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     startEdgeCreation,
     cancelEdgeCreation,
     pushHistory,
+    setActiveGraph,
   } = useGraphStore();
 
   const { dijkstraHighlight } = useDijkstraStore();
@@ -1003,6 +1006,31 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     return result;
   }
 
+  function getGraphContainingPoint(screenX: number, screenY: number): Graph | null {
+    const currentPan = panRef.current;
+    const currentZoom = zoomRef.current;
+    const candidates = graphsToRender.filter((g) => g.id !== activeGraphId);
+    for (const g of [...candidates].reverse()) {
+      if (!g.vertices.length) continue;
+      const local = {
+        x: (screenX - currentPan.x - g.offsetX * currentZoom) / currentZoom,
+        y: (screenY - currentPan.y - g.offsetY * currentZoom) / currentZoom,
+      };
+      const xs = g.vertices.map((v) => v.x);
+      const ys = g.vertices.map((v) => v.y);
+      const pad = VERTEX_RADIUS;
+      if (
+        local.x >= Math.min(...xs) - pad &&
+        local.x <= Math.max(...xs) + pad &&
+        local.y >= Math.min(...ys) - pad &&
+        local.y <= Math.max(...ys) + pad
+      ) {
+        return g;
+      }
+    }
+    return null;
+  }
+
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
     if (readOnly) return;
     const pos = getCanvasPos(e.clientX, e.clientY);
@@ -1022,7 +1050,13 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     }
 
     if (tool === "select") {
-      const hitResult = getVertexAtPosition(pos.x, pos.y, activeGraph || undefined);
+      const hitResult = getVertexAtPosition(pos.x, pos.y);
+
+      if (hitResult && hitResult.graphId !== activeGraphId) {
+        setActiveGraph(hitResult.graphId);
+        return;
+      }
+
       const edge = getEdgeAtPosition(pos.x, pos.y, activeGraph || undefined);
 
       if (hitResult) {
@@ -1046,6 +1080,11 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       } else if (edge) {
         selectEdge(edge.id, e.shiftKey);
       } else {
+        const targetGraph = getGraphContainingPoint(pos.x, pos.y);
+        if (targetGraph) {
+          setActiveGraph(targetGraph.id);
+          return;
+        }
         const sb = { startX: pos.x, startY: pos.y, endX: pos.x, endY: pos.y };
         selectionBoxRef.current = sb;
         setSelectionBox({ ...sb });
@@ -1094,6 +1133,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       const newPan = { x: pos.x - panStart.current.x, y: pos.y - panStart.current.y };
       setPan(newPan);
       panRef.current = newPan;
+      if (viewportRef) viewportRef.current = { pan: newPan, zoom: zoomRef.current };
       draw();
       return;
     }
@@ -1340,6 +1380,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         const newPan = { x: pos.x - panStart.current.x, y: pos.y - panStart.current.y };
         setPan(newPan);
         panRef.current = newPan;
+        if (viewportRef) viewportRef.current = { pan: newPan, zoom: zoomRef.current };
         draw();
         lastTouchRef.current = pos;
         return;
