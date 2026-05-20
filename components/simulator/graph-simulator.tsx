@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { GraphCanvas, type GraphCanvasRef } from "@/components/graph-canvas";
+import { GraphLayersOverlay } from "@/components/graph-layer/graph-layers-overlay";
 import { GraphManager } from "@/components/graph-manager";
 import { PropertiesPanel } from "@/components/properties-panel";
 import { MatrixPanel } from "@/components/matrix-panel";
@@ -62,6 +63,7 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
   const [zoom, setZoom] = useState(1);
   const canvasRef = useRef<GraphCanvasRef>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<{ pan: { x: number; y: number }; zoom: number }>({ pan: { x: 0, y: 0 }, zoom: 1 });
   const didInitialFitRef = useRef(false);
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
@@ -409,7 +411,8 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
         <div className="flex flex-1 overflow-hidden">
           <main className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
             <div ref={canvasWrapperRef} className="flex-1 p-1.5 sm:p-4 overflow-hidden relative">
-              <GraphCanvas ref={canvasRef} zoom={zoom} onZoomChange={setZoom} showAllGraphs={true} />
+              <GraphCanvas ref={canvasRef} zoom={zoom} onZoomChange={setZoom} showAllGraphs={true} viewportRef={viewportRef} />
+              <GraphLayersOverlay viewportRef={viewportRef} />
               {isEmpty && <EmptyGraphState onCreate={() => createGraph()} />}
               <FloatingToolbar
                 containerRef={canvasWrapperRef}
