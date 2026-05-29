@@ -1,11 +1,14 @@
 "use client";
 
-import { useRef, type MutableRefObject } from "react";
-import { Eye } from "lucide-react";
+import { useRef, useState, type MutableRefObject } from "react";
+import { Eye, MoreHorizontal, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Graph } from "@/lib/graph-types";
 import { computeSingleGraphBounds, VERTEX_RADIUS } from "@/core/domain/graph/graph-bounds";
 import { useGraphStore } from "@/lib/graph-store";
+import { GraphContainerMenu } from "./graph-container-menu";
+
+type MenuAnchor = { x: number; y: number };
 
 const TITLE_HEIGHT = 24;
 const CONTAINER_PADDING = VERTEX_RADIUS + 8;
@@ -15,11 +18,13 @@ interface GraphLayerContainerProps {
   isActive: boolean;
   viewportRef: MutableRefObject<{ pan: { x: number; y: number }; zoom: number }>;
   onSelect: () => void;
-  onOpenNotes: () => void;
+  onOpenNote: () => void;
 }
 
-export function GraphLayerContainer({ graph, isActive, viewportRef, onSelect, onOpenNotes }: GraphLayerContainerProps) {
-  const { tool, pushHistory, moveGraphOffset } = useGraphStore();
+export function GraphLayerContainer({ graph, isActive, viewportRef, onSelect, onOpenNote }: GraphLayerContainerProps) {
+  const { pushHistory, moveGraphOffset, autoLayout, getActiveGraph } = useGraphStore();
+  const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   const lastPos = useRef({ x: 0, y: 0 });
   const hasDragged = useRef(false);
@@ -33,13 +38,9 @@ export function GraphLayerContainer({ graph, isActive, viewportRef, onSelect, on
   const width = bounds.maxX - bounds.minX;
   const height = bounds.maxY - bounds.minY + TITLE_HEIGHT;
 
-  const isSelectTool = tool === "select";
+  const canAutoLayout = (getActiveGraph()?.id === graph.id) && (graph.vertices.length >= 2);
 
   function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    if (!isSelectTool) {
-      onSelect();
-      return;
-    }
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     lastPos.current = { x: e.clientX, y: e.clientY };
@@ -70,7 +71,7 @@ export function GraphLayerContainer({ graph, isActive, viewportRef, onSelect, on
     if (!hasDragged.current) onSelect();
   }
 
-  const titleBarCursor = isSelectTool ? (hasDragged.current ? "grabbing" : "grab") : "pointer";
+  const titleBarCursor = hasDragged.current ? "grabbing" : "grab";
 
   return (
     <div
@@ -98,27 +99,79 @@ export function GraphLayerContainer({ graph, isActive, viewportRef, onSelect, on
           touchAction: "none",
         }}
         className={cn(
-          "absolute top-0 left-0 right-0 flex items-center justify-between gap-1 px-2 rounded-t-lg select-none",
+          "absolute top-0 left-0 right-0 flex items-center gap-1 px-2 rounded-t-lg select-none",
           isActive ? "bg-primary/10" : "bg-black/20 hover:bg-white/5",
         )}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
-        <span className={cn("text-[11px] font-medium truncate leading-none", isActive ? "text-primary/90" : "text-white/50")}>{graph.name}</span>
+        <span className={cn("text-[11px] font-medium truncate leading-none flex-1", isActive ? "text-primary/90" : "text-white/50")}>
+          {graph.name}
+        </span>
 
         <button
           style={{ pointerEvents: "auto" }}
           onClick={(e) => {
             e.stopPropagation();
-            onOpenNotes();
+            if (canAutoLayout) autoLayout();
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          disabled={!canAutoLayout}
+          className={cn(
+            "shrink-0 p-1 rounded transition-colors",
+            isActive && canAutoLayout
+              ? "text-primary/60 hover:text-primary"
+              : "text-white/20 cursor-not-allowed",
+          )}
+          aria-label="Auto-layout"
+        >
+          <Wand2 size={11} />
+        </button>
+
+        <button
+          ref={menuButtonRef}
+          style={{ pointerEvents: "auto" }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect();
+            if (menuAnchor) {
+              setMenuAnchor(null);
+            } else {
+              const rect = menuButtonRef.current?.getBoundingClientRect();
+              if (rect) setMenuAnchor({ x: rect.left, y: rect.bottom + 4 });
+            }
           }}
           onPointerDown={(e) => e.stopPropagation()}
           className={cn(
             "shrink-0 p-1 rounded transition-colors",
             isActive ? "text-primary/60 hover:text-primary" : "text-white/30 hover:text-white/70",
           )}
-          aria-label={`Observações de ${graph.name}`}
+          aria-label={`Menu de ${graph.name}`}
+        >
+          <MoreHorizontal size={11} />
+        </button>
+        {menuAnchor && (
+          <GraphContainerMenu
+            graphId={graph.id}
+            anchor={menuAnchor}
+            onClose={() => setMenuAnchor(null)}
+            onOpenNote={onOpenNote}
+          />
+        )}
+
+        <button
+          style={{ pointerEvents: "auto" }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenNote();
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className={cn(
+            "shrink-0 p-1 rounded transition-colors",
+            isActive ? "text-primary/60 hover:text-primary" : "text-white/30 hover:text-white/70",
+          )}
+          aria-label={`Anotação de ${graph.name}`}
         >
           <Eye size={11} />
         </button>

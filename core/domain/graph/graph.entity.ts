@@ -15,6 +15,9 @@ export interface Edge {
   directed: boolean;
 }
 
+export type NoteColor = "yellow" | "green" | "blue" | "pink" | "white";
+export type MatrixType = "adjacency" | "incidence";
+
 export interface Graph {
   id: string;
   name: string;
@@ -32,10 +35,13 @@ export interface Graph {
 
   chromaticNumber?: number;
   chromaticColors?: string[];
-  notes?: string;
-}
 
-export type Tool = "select" | "vertex" | "edge" | "delete" | "pan";
+  notes?: string;
+  noteColor?: NoteColor;
+
+  showMatrix?: boolean;
+  matrixType?: MatrixType;
+}
 
 export interface GraphFolder {
   id: string;
@@ -55,9 +61,6 @@ export interface GraphState {
   activeGraphId: string | null;
   selectedVertexIds: string[];
   selectedEdgeIds: string[];
-  tool: Tool;
-  isCreatingEdge: boolean;
-  edgeSourceId: string | null;
   compareMode: boolean;
   compareGraphId: string | null;
   gridSnap: boolean;

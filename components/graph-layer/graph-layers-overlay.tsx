@@ -3,16 +3,17 @@
 import { useRef, useEffect, useState, type MutableRefObject } from "react";
 import { useGraphStore } from "@/lib/graph-store";
 import { GraphLayerContainer } from "./graph-layer-container";
-import { GraphNotesModal } from "./graph-notes-modal";
+import { GraphInlineMatrix } from "./graph-inline-matrix";
+import { GraphStickyNote } from "./graph-sticky-note";
 
 interface GraphLayersOverlayProps {
   viewportRef: MutableRefObject<{ pan: { x: number; y: number }; zoom: number }>;
 }
 
 export function GraphLayersOverlay({ viewportRef }: GraphLayersOverlayProps) {
-  const { graphs, activeGraphId, setActiveGraph } = useGraphStore();
+  const { graphs, activeGraphId, setActiveGraph, updateGraph } = useGraphStore();
   const viewportLayerRef = useRef<HTMLDivElement>(null);
-  const [notesGraphId, setNotesGraphId] = useState<string | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
 
   useEffect(() => {
     let frameId: number;
@@ -30,7 +31,13 @@ export function GraphLayersOverlay({ viewportRef }: GraphLayersOverlayProps) {
   }, [viewportRef]);
 
   const visibleGraphs = graphs.filter((g) => g.visible !== false);
-  const notesGraph = notesGraphId ? graphs.find((g) => g.id === notesGraphId) : null;
+
+  function handleOpenNote(graphId: string) {
+    setEditingNoteId(graphId);
+    if (!graphs.find((g) => g.id === graphId)?.notes) {
+      updateGraph(graphId, { notes: " " });
+    }
+  }
 
   return (
     <div
@@ -55,22 +62,28 @@ export function GraphLayersOverlay({ viewportRef }: GraphLayersOverlayProps) {
             isActive={graph.id === activeGraphId}
             viewportRef={viewportRef}
             onSelect={() => setActiveGraph(graph.id)}
-            onOpenNotes={() => setNotesGraphId(graph.id)}
+            onOpenNote={() => handleOpenNote(graph.id)}
           />
         ))}
-      </div>
 
-      {notesGraph && (
-        <GraphNotesModal
-          graphId={notesGraph.id}
-          graphName={notesGraph.name}
-          initialNotes={notesGraph.notes ?? ""}
-          open={true}
-          onOpenChange={(open) => {
-            if (!open) setNotesGraphId(null);
-          }}
-        />
-      )}
+        {visibleGraphs
+          .filter((g) => g.showMatrix)
+          .map((graph) => (
+            <GraphInlineMatrix key={`matrix-${graph.id}`} graph={graph} />
+          ))}
+
+        {visibleGraphs
+          .filter((g) => (g.notes && g.notes.trim()) || g.id === editingNoteId)
+          .map((graph) => (
+            <GraphStickyNote
+              key={`note-${graph.id}`}
+              graph={graph}
+              isEditing={graph.id === editingNoteId}
+              onStartEdit={() => setEditingNoteId(graph.id)}
+              onStopEdit={() => setEditingNoteId(null)}
+            />
+          ))}
+      </div>
     </div>
   );
 }
