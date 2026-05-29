@@ -395,10 +395,11 @@ export function GraphContainerMenu({ graphId, anchor, onClose, onOpenNote }: Gra
 
   return createPortal(
     <>
-      <div className="fixed inset-0 z-49" onPointerDown={onClose} />
+      <div className="fixed inset-0 z-49" onPointerDown={(e) => { e.stopPropagation(); onClose(); }} />
     <div
       style={{ position: "fixed", left: anchor.x, top: anchor.y, zIndex: 50 }}
       className="bg-popover border border-border rounded-lg shadow-xl w-70 max-h-[80vh] overflow-y-auto text-sm"
+      onPointerDown={(e) => e.stopPropagation()}
     >
       <Section title="Propriedades do Grafo" defaultOpen>
         <div className="flex items-center justify-between">
