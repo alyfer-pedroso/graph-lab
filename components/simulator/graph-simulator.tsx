@@ -4,21 +4,15 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Network,
-  Settings2,
-  Grid3X3,
-  BarChart3,
-  GitCompare,
   HelpCircle,
   Keyboard,
   Github,
   Linkedin,
   PanelLeftOpen,
-  PanelRightOpen,
   Download,
   ArrowLeft,
   Pencil,
 } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
@@ -27,13 +21,12 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { GraphCanvas, type GraphCanvasRef } from "@/components/graph-canvas";
 import { GraphLayersOverlay } from "@/components/graph-layer/graph-layers-overlay";
 import { GraphManager } from "@/components/graph-manager";
-import { PropertiesPanel } from "@/components/properties-panel";
-import { MatrixPanel } from "@/components/matrix-panel";
-import { AnalysisPanel } from "@/components/analysis-panel";
-import { ComparisonPanel } from "@/components/comparison-panel";
 import { EmptyGraphState } from "@/components/simulator/empty-graph-state";
 import { FloatingToolbar } from "@/components/toolbar/floating-toolbar";
 import { RenameProjectDialog } from "@/components/home/rename-project-dialog";
+import { CanvasContextMenu } from "@/components/canvas-menus/canvas-context-menu";
+import { VertexContextMenu } from "@/components/canvas-menus/vertex-context-menu";
+import { EdgeContextMenu } from "@/components/canvas-menus/edge-context-menu";
 import { useGraphStore } from "@/lib/graph-store";
 
 function ShortcutGroup({ title, items }: { title: string; items: [string, string][] }) {
@@ -52,6 +45,12 @@ function ShortcutGroup({ title, items }: { title: string; items: [string, string
   );
 }
 
+type ContextMenuState =
+  | { type: "canvas"; localX: number; localY: number; screenX: number; screenY: number }
+  | { type: "vertex"; vertexId: string; screenX: number; screenY: number }
+  | { type: "edge"; edgeId: string; screenX: number; screenY: number }
+  | null;
+
 interface GraphSimulatorProps {
   projectName: string;
   onRenameProject: (name: string) => void;
@@ -59,16 +58,15 @@ interface GraphSimulatorProps {
 
 export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorProps) {
   const router = useRouter();
-  const { setTool, undo, redo, toggleGridSnap, graphs, createGraph } = useGraphStore();
+  const { undo, redo, toggleGridSnap, graphs, createGraph } = useGraphStore();
   const [zoom, setZoom] = useState(1);
   const canvasRef = useRef<GraphCanvasRef>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<{ pan: { x: number; y: number }; zoom: number }>({ pan: { x: 0, y: 0 }, zoom: 1 });
   const didInitialFitRef = useRef(false);
   const [leftOpen, setLeftOpen] = useState(false);
-  const [rightOpen, setRightOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("properties");
   const [renameOpen, setRenameOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
 
   const isEmpty = graphs.length === 0;
 
@@ -117,70 +115,22 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
         return;
       }
 
-      switch (e.key.toLowerCase()) {
-        case "v":
-          setTool("select");
-          break;
-        case "n":
-          setTool("vertex");
-          break;
-        case "e":
-          setTool("edge");
-          break;
-        case "d":
-          setTool("delete");
-          break;
-        case "h":
-          setTool("pan");
-          break;
-        case "g":
-          toggleGridSnap();
-          break;
+      if (e.key.toLowerCase() === "g") {
+        toggleGridSnap();
+      }
+
+      if (e.key === "Escape") {
+        setContextMenu(null);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [setTool, undo, redo, toggleGridSnap]);
+  }, [undo, redo, toggleGridSnap]);
 
-  const RightPanelContent = () => (
-    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-      <TabsList className="w-full rounded-none border-b border-border bg-transparent p-0 h-auto shrink-0">
-        {[
-          { value: "properties", icon: Settings2, label: "Propriedades" },
-          { value: "matrix", icon: Grid3X3, label: "Matrizes" },
-          { value: "analysis", icon: BarChart3, label: "Análise" },
-          { value: "compare", icon: GitCompare, label: "Comparar" },
-        ].map(({ value, icon: Icon, label }) => (
-          <TabsTrigger
-            key={value}
-            value={value}
-            className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-3"
-          >
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Icon className="h-4 w-4" />
-              </TooltipTrigger>
-              <TooltipContent>{label}</TooltipContent>
-            </Tooltip>
-          </TabsTrigger>
-        ))}
-      </TabsList>
-      <div className="flex-1 overflow-auto">
-        <TabsContent value="properties" className="m-0 h-full">
-          <PropertiesPanel />
-        </TabsContent>
-        <TabsContent value="matrix" className="m-0 h-full">
-          <MatrixPanel />
-        </TabsContent>
-        <TabsContent value="analysis" className="m-0 h-full">
-          <AnalysisPanel />
-        </TabsContent>
-        <TabsContent value="compare" className="m-0 h-full">
-          <ComparisonPanel />
-        </TabsContent>
-      </div>
-    </Tabs>
-  );
+  function handleStartEdge(vertexId: string) {
+    setContextMenu(null);
+    canvasRef.current?.startEdgeCreation(vertexId);
+  }
 
   return (
     <TooltipProvider>
@@ -268,16 +218,6 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
                 </DialogHeader>
                 <div className="space-y-4 text-sm">
                   <ShortcutGroup
-                    title="Ferramentas"
-                    items={[
-                      ["Selecionar", "V"],
-                      ["Novo Vértice", "N"],
-                      ["Nova Aresta", "E"],
-                      ["Excluir", "D"],
-                      ["Mover Canvas", "H"],
-                    ]}
-                  />
-                  <ShortcutGroup
                     title="Histórico"
                     items={[
                       ["Desfazer", "Ctrl+Z"],
@@ -311,48 +251,39 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
                 <div className="space-y-4 text-sm">
                   <div>
                     <h4 className="font-semibold mb-1">Criar Vértices</h4>
-                    <p className="text-muted-foreground">Selecione a ferramenta de vértice (N) e clique no canvas para adicionar.</p>
+                    <p className="text-muted-foreground">Dê um duplo clique (ou duplo toque) em qualquer área vazia do canvas para adicionar um vértice.</p>
                   </div>
                   <div>
                     <h4 className="font-semibold mb-1">Criar Arestas</h4>
-                    <p className="text-muted-foreground">Selecione a ferramenta de aresta (E), clique no vértice origem e depois no destino.</p>
+                    <p className="text-muted-foreground">Dê um duplo clique em um vértice e selecione "Desenhar aresta". Clique no vértice destino para conectar.</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold mb-1">Editar Vértices e Arestas</h4>
+                    <p className="text-muted-foreground">Dê um duplo clique em um vértice ou aresta para abrir o menu de edição com opções de rótulo, cor e exclusão.</p>
                   </div>
                   <div>
                     <h4 className="font-semibold mb-1">Mover Vértices</h4>
-                    <p className="text-muted-foreground">
-                      Use a ferramenta Selecionar (V) e arraste qualquer vértice. Quando o Snap à Grade (G) está ativado, os vértices se alinham
-                      automaticamente à grade ao serem movidos.
-                    </p>
+                    <p className="text-muted-foreground">Arraste qualquer vértice. Com o Snap à Grade (G) ativado, os vértices se alinham à grade automaticamente.</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold mb-1">Mover o Canvas</h4>
+                    <p className="text-muted-foreground">Arraste uma área vazia do canvas para navegar. Use o scroll para aplicar zoom.</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold mb-1">Menu do Grafo (⋯)</h4>
+                    <p className="text-muted-foreground">Clique no botão ⋯ no cabeçalho do container do grafo para acessar propriedades, algoritmos, matrizes e muito mais.</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold mb-1">Mover o Container</h4>
+                    <p className="text-muted-foreground">Arraste a barra de título do container para reposicionar o grafo no canvas.</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold mb-1">Anotações (Post-it)</h4>
+                    <p className="text-muted-foreground">Use o ícone de olho no cabeçalho do container para abrir ou criar uma anotação em post-it para o grafo.</p>
                   </div>
                   <div>
                     <h4 className="font-semibold mb-1">Barra de Ferramentas Flutuante</h4>
-                    <p className="text-muted-foreground">
-                      Arraste a alça da barra de ferramentas para reposicioná-la em qualquer canto ou borda lateral do canvas. Use o botão Ajustar à
-                      Tela para enquadrar todos os grafos automaticamente.
-                    </p>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold mb-1">Desfazer e Refazer</h4>
-                    <p className="text-muted-foreground">
-                      Use os botões da toolbar ou os atalhos Ctrl+Z para desfazer e Ctrl+Y para refazer.
-                    </p>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold mb-1">Camadas de Grafos</h4>
-                    <p className="text-muted-foreground">
-                      Use a barra lateral esquerda para controlar opacidade, visibilidade e posição de cada grafo.
-                    </p>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold mb-1">Gestos em Mobile</h4>
-                    <p className="text-muted-foreground">
-                      Toque para selecionar, arraste para mover vértices e use dois dedos para aplicar zoom. Em modo retrato, a barra de ferramentas
-                      fica na vertical e pode ser arrastada para liberar espaço no canvas.
-                    </p>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold mb-1">Exportar</h4>
-                    <p className="text-muted-foreground">Clique no ícone de download no cabeçalho para exportar o canvas como PNG ou JPEG.</p>
+                    <p className="text-muted-foreground">Arraste a alça da barra de ferramentas para reposicioná-la. Use os botões de zoom para enquadrar os grafos.</p>
                   </div>
                   <div className="pt-4 mt-4 border-t border-border">
                     <p className="text-muted-foreground text-center mb-2">Criado por Alyfer Pedroso</p>
@@ -378,21 +309,6 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
                 </div>
               </DialogContent>
             </Dialog>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 sm:h-8 sm:w-8"
-                  onClick={() => setRightOpen(true)}
-                  aria-label="Abrir painel de propriedades"
-                >
-                  <PanelRightOpen className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Propriedades</TooltipContent>
-            </Tooltip>
           </div>
         </header>
 
@@ -402,16 +318,25 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
           </SheetContent>
         </Sheet>
 
-        <Sheet open={rightOpen} onOpenChange={setRightOpen}>
-          <SheetContent side="right" className="w-[90vw] max-w-sm p-0 flex flex-col">
-            <RightPanelContent />
-          </SheetContent>
-        </Sheet>
-
         <div className="flex flex-1 overflow-hidden">
           <main className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
             <div ref={canvasWrapperRef} className="flex-1 p-1.5 sm:p-4 overflow-hidden relative">
-              <GraphCanvas ref={canvasRef} zoom={zoom} onZoomChange={setZoom} showAllGraphs={true} viewportRef={viewportRef} />
+              <GraphCanvas
+                ref={canvasRef}
+                zoom={zoom}
+                onZoomChange={setZoom}
+                showAllGraphs={true}
+                viewportRef={viewportRef}
+                onCanvasDoubleClick={(localX, localY, screenX, screenY) =>
+                  setContextMenu({ type: "canvas", localX, localY, screenX, screenY })
+                }
+                onVertexDoubleClick={(vertexId, screenX, screenY) =>
+                  setContextMenu({ type: "vertex", vertexId, screenX, screenY })
+                }
+                onEdgeDoubleClick={(edgeId, screenX, screenY) =>
+                  setContextMenu({ type: "edge", edgeId, screenX, screenY })
+                }
+              />
               <GraphLayersOverlay viewportRef={viewportRef} />
               {isEmpty && <EmptyGraphState onCreate={() => createGraph()} />}
               <FloatingToolbar
@@ -421,6 +346,33 @@ export function GraphSimulator({ projectName, onRenameProject }: GraphSimulatorP
                 onReset={handleReset}
                 onFitView={handleFitView}
               />
+
+              {contextMenu?.type === "canvas" && (
+                <CanvasContextMenu
+                  screenX={contextMenu.screenX}
+                  screenY={contextMenu.screenY}
+                  localX={contextMenu.localX}
+                  localY={contextMenu.localY}
+                  onClose={() => setContextMenu(null)}
+                />
+              )}
+              {contextMenu?.type === "vertex" && (
+                <VertexContextMenu
+                  vertexId={contextMenu.vertexId}
+                  screenX={contextMenu.screenX}
+                  screenY={contextMenu.screenY}
+                  onClose={() => setContextMenu(null)}
+                  onStartEdge={handleStartEdge}
+                />
+              )}
+              {contextMenu?.type === "edge" && (
+                <EdgeContextMenu
+                  edgeId={contextMenu.edgeId}
+                  screenX={contextMenu.screenX}
+                  screenY={contextMenu.screenY}
+                  onClose={() => setContextMenu(null)}
+                />
+              )}
             </div>
           </main>
         </div>

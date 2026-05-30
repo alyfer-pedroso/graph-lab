@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Graph, Vertex, Edge, Tool, GraphState, GraphFolder, HistorySnapshot } from "./graph-types";
+import type { Graph, Vertex, Edge, GraphState, GraphFolder, HistorySnapshot } from "./graph-types";
 import { HISTORY_LIMIT } from "./graph-types";
 import type { ProjectPayload } from "@/core/domain/project/project.entity";
 import { getGraphDefaultColor } from "@/core/domain/graph/graph-color";
@@ -45,11 +45,6 @@ interface GraphStore extends GraphState {
   selectEdge: (id: string, addToSelection?: boolean) => void;
   clearSelection: () => void;
 
-  setTool: (tool: Tool) => void;
-
-  startEdgeCreation: (sourceId: string) => void;
-  cancelEdgeCreation: () => void;
-
   setCompareMode: (enabled: boolean) => void;
   setCompareGraph: (id: string | null) => void;
 
@@ -92,9 +87,6 @@ export const useGraphStore = create<GraphStore>()((set, get) => ({
   activeGraphId: null,
   selectedVertexIds: [],
   selectedEdgeIds: [],
-  tool: "select",
-  isCreatingEdge: false,
-  edgeSourceId: null,
   compareMode: false,
   compareGraphId: null,
   gridSnap: true,
@@ -135,8 +127,6 @@ export const useGraphStore = create<GraphStore>()((set, get) => ({
           selectedEdgeIds: [],
           compareMode: false,
           compareGraphId: null,
-          isCreatingEdge: false,
-          edgeSourceId: null,
           past: [],
           future: [],
         });
@@ -152,8 +142,6 @@ export const useGraphStore = create<GraphStore>()((set, get) => ({
           selectedEdgeIds: [],
           compareMode: false,
           compareGraphId: null,
-          isCreatingEdge: false,
-          edgeSourceId: null,
           past: [],
           future: [],
         });
@@ -301,8 +289,6 @@ export const useGraphStore = create<GraphStore>()((set, get) => ({
         set((state) => ({
           ...withHistory(state),
           graphs: state.graphs.map((g) => (g.id === state.activeGraphId ? { ...g, edges: [...g.edges, newEdge] } : g)),
-          isCreatingEdge: false,
-          edgeSourceId: null,
         }));
         return newEdge.id;
       },
@@ -350,18 +336,6 @@ export const useGraphStore = create<GraphStore>()((set, get) => ({
         set({ selectedVertexIds: [], selectedEdgeIds: [] });
       },
 
-      setTool: (tool) => {
-        set({ tool, isCreatingEdge: false, edgeSourceId: null });
-      },
-
-      startEdgeCreation: (sourceId) => {
-        set({ isCreatingEdge: true, edgeSourceId: sourceId });
-      },
-
-      cancelEdgeCreation: () => {
-        set({ isCreatingEdge: false, edgeSourceId: null });
-      },
-
       setCompareMode: (enabled) => {
         set({ compareMode: enabled, compareGraphId: enabled ? null : null });
       },
@@ -394,8 +368,6 @@ export const useGraphStore = create<GraphStore>()((set, get) => ({
             activeGraphId: previous.activeGraphId,
             selectedVertexIds: [],
             selectedEdgeIds: [],
-            isCreatingEdge: false,
-            edgeSourceId: null,
           };
         });
       },
@@ -412,8 +384,6 @@ export const useGraphStore = create<GraphStore>()((set, get) => ({
             activeGraphId: next.activeGraphId,
             selectedVertexIds: [],
             selectedEdgeIds: [],
-            isCreatingEdge: false,
-            edgeSourceId: null,
           };
         });
       },

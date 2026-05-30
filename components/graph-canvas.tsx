@@ -17,16 +17,32 @@ interface GraphCanvasProps {
   onZoomChange?: (zoom: number) => void;
   showAllGraphs?: boolean;
   viewportRef?: MutableRefObject<{ pan: { x: number; y: number }; zoom: number }>;
+  onVertexDoubleClick?: (vertexId: string, screenX: number, screenY: number) => void;
+  onEdgeDoubleClick?: (edgeId: string, screenX: number, screenY: number) => void;
+  onCanvasDoubleClick?: (localX: number, localY: number, screenX: number, screenY: number) => void;
 }
 
 export interface GraphCanvasRef {
   resetView: () => void;
   fitView: () => void;
   exportImage: (format: "png" | "jpeg") => void;
+  startEdgeCreation: (sourceVertexId: string) => void;
 }
 
 export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphCanvas(
-  { graphId, readOnly = false, width = 800, height = 600, zoom: externalZoom, onZoomChange, showAllGraphs = false, viewportRef },
+  {
+    graphId,
+    readOnly = false,
+    width = 800,
+    height = 600,
+    zoom: externalZoom,
+    onZoomChange,
+    showAllGraphs = false,
+    viewportRef,
+    onVertexDoubleClick,
+    onEdgeDoubleClick,
+    onCanvasDoubleClick,
+  },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -59,9 +75,10 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   const [isPanning, setIsPanning] = useState(false);
   const panStart = useRef({ x: 0, y: 0 });
 
-  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
-  const selectionBoxRef = useRef<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
-  const isRubberBanding = useRef(false);
+  const [isCreatingEdge, setIsCreatingEdge] = useState(false);
+  const [edgeSourceVertexId, setEdgeSourceVertexId] = useState<string | null>(null);
+  const isCreatingEdgeRef = useRef(false);
+  const edgeSourceVertexIdRef = useRef<string | null>(null);
 
   const [isMovingSelection, setIsMovingSelection] = useState(false);
   const moveStart = useRef({ x: 0, y: 0 });
@@ -86,6 +103,13 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
   const animFrameRef = useRef<number | null>(null);
   const animTimeRef = useRef<number>(0);
 
+  function cancelEdgeCreationLocal() {
+    setIsCreatingEdge(false);
+    setEdgeSourceVertexId(null);
+    isCreatingEdgeRef.current = false;
+    edgeSourceVertexIdRef.current = null;
+  }
+
   useImperativeHandle(
     ref,
     () => ({
@@ -93,6 +117,12 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         setPan({ x: 0, y: 0 });
         panRef.current = { x: 0, y: 0 };
         setZoom(1);
+      },
+      startEdgeCreation: (sourceVertexId: string) => {
+        setIsCreatingEdge(true);
+        setEdgeSourceVertexId(sourceVertexId);
+        isCreatingEdgeRef.current = true;
+        edgeSourceVertexIdRef.current = sourceVertexId;
       },
       fitView: () => {
         const container = containerRef.current;
@@ -143,9 +173,6 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     activeGraphId,
     selectedVertexIds,
     selectedEdgeIds,
-    tool,
-    isCreatingEdge,
-    edgeSourceId,
     gridSnap,
     addVertex,
     moveVertex,
@@ -155,8 +182,6 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     selectVertex,
     selectEdge,
     clearSelection,
-    startEdgeCreation,
-    cancelEdgeCreation,
     pushHistory,
     setActiveGraph,
   } = useGraphStore();
@@ -351,8 +376,8 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         }
       });
 
-      if (graph.id === activeGraphId && isCreatingEdge && edgeSourceId) {
-        const sourceVertex = graph.vertices.find((v) => v.id === edgeSourceId);
+      if (graph.id === activeGraphId && isCreatingEdgeRef.current && edgeSourceVertexIdRef.current) {
+        const sourceVertex = graph.vertices.find((v) => v.id === edgeSourceVertexIdRef.current);
         if (sourceVertex) {
           ctx.strokeStyle = "#22c55e";
           ctx.lineWidth = 2;
@@ -371,7 +396,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       graph.vertices.forEach((vertex) => {
         const isActive = graph.id === activeGraphId;
         const isSelected = isActive && selectedVertexIdsRef.current.includes(vertex.id);
-        const isEdgeSource = isActive && vertex.id === edgeSourceId;
+        const isEdgeSource = isActive && vertex.id === edgeSourceVertexIdRef.current;
 
         let dijkstraVertexState: "none" | "current" | "visited" | "path" | "start" | "target" | "tree-root" | "tree-node" = "none";
         if (dh && isActive) {
@@ -396,29 +421,13 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       ctx.restore();
     }
 
-    const sb = selectionBoxRef.current;
-    if (sb) {
-      const x = Math.min(sb.startX, sb.endX);
-      const y = Math.min(sb.startY, sb.endY);
-      const w = Math.abs(sb.endX - sb.startX);
-      const h = Math.abs(sb.endY - sb.startY);
-      ctx.save();
-      ctx.strokeStyle = "#3b82f6";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 4]);
-      ctx.strokeRect(x, y, w, h);
-      ctx.fillStyle = "rgba(59,130,246,0.08)";
-      ctx.fillRect(x, y, w, h);
-      ctx.setLineDash([]);
-      ctx.restore();
-    }
-  }, [graphsToRender, activeGraph, canvasSize, isCreatingEdge, edgeSourceId, activeGraphId]);
+  }, [graphsToRender, activeGraph, canvasSize, isCreatingEdge, edgeSourceVertexId, activeGraphId]);
 
   useEffect(() => {
     if (!dijkstraHighlight && !treeHighlight) {
       draw();
     }
-  }, [draw, pan, zoom, selectionBox, mousePos, selectedVertexIds, selectedEdgeIds, dijkstraHighlight, treeHighlight]);
+  }, [draw, pan, zoom, mousePos, selectedVertexIds, selectedEdgeIds, dijkstraHighlight, treeHighlight]);
 
   function drawVertex(
     ctx: CanvasRenderingContext2D,
@@ -1043,84 +1052,80 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       return;
     }
 
-    if (tool === "pan") {
-      setIsPanning(true);
-      panStart.current = { x: pos.x - panRef.current.x, y: pos.y - panRef.current.y };
+    if (e.button !== 0) return;
+
+    if (isCreatingEdgeRef.current) {
+      const hitResult = getVertexAtPosition(pos.x, pos.y, activeGraph || undefined);
+      if (hitResult && edgeSourceVertexIdRef.current) {
+        addEdge(edgeSourceVertexIdRef.current, hitResult.vertex.id);
+      }
+      cancelEdgeCreationLocal();
       return;
     }
 
-    if (tool === "select") {
-      const hitResult = getVertexAtPosition(pos.x, pos.y);
+    const hitResult = getVertexAtPosition(pos.x, pos.y);
 
-      if (hitResult && hitResult.graphId !== activeGraphId) {
-        setActiveGraph(hitResult.graphId);
-        return;
-      }
-
-      const edge = getEdgeAtPosition(pos.x, pos.y, activeGraph || undefined);
-
-      if (hitResult) {
-        const vertexId = hitResult.vertex.id;
-        const alreadySelected = selectedVertexIdsRef.current.includes(vertexId);
-
-        if (alreadySelected && selectedVertexIdsRef.current.length > 1) {
-          setIsMovingSelection(true);
-          isMovingSelectionRef.current = true;
-          moveStart.current = pos;
-          if (activeGraph) movingVerticesStartRef.current = snapshotSelectedVertices(activeGraph);
-          dragHistoryPushedRef.current = false;
-        } else {
-          selectVertex(vertexId, e.shiftKey);
-          setIsDragging(true);
-          dragVertexRef.current = vertexId;
-          setDragVertex(vertexId);
-          dragHistoryPushedRef.current = false;
-          dragOriginRef.current = pos;
-        }
-      } else if (edge) {
-        selectEdge(edge.id, e.shiftKey);
-      } else {
-        const targetGraph = getGraphContainingPoint(pos.x, pos.y);
-        if (targetGraph) {
-          setActiveGraph(targetGraph.id);
-          return;
-        }
-        const sb = { startX: pos.x, startY: pos.y, endX: pos.x, endY: pos.y };
-        selectionBoxRef.current = sb;
-        setSelectionBox({ ...sb });
-        isRubberBanding.current = true;
-        if (!e.shiftKey) clearSelection();
-      }
+    if (hitResult && hitResult.graphId !== activeGraphId) {
+      setActiveGraph(hitResult.graphId);
       return;
     }
 
-    const hitResult = getVertexAtPosition(pos.x, pos.y, activeGraph || undefined);
-    const vertex = hitResult?.vertex;
     const edge = getEdgeAtPosition(pos.x, pos.y, activeGraph || undefined);
 
-    switch (tool) {
-      case "vertex":
-        if (!vertex && activeGraph) {
-          const local = screenToGraph(pos.x, pos.y, activeGraph);
-          addVertex(local.x, local.y);
-        }
-        break;
-      case "edge":
-        if (vertex) {
-          if (isCreatingEdge && edgeSourceId) {
-            addEdge(edgeSourceId, vertex.id);
-            cancelEdgeCreation();
-          } else {
-            startEdgeCreation(vertex.id);
-          }
-        } else {
-          cancelEdgeCreation();
-        }
-        break;
-      case "delete":
-        if (vertex) deleteVertex(vertex.id);
-        else if (edge) deleteEdge(edge.id);
-        break;
+    if (hitResult) {
+      const vertexId = hitResult.vertex.id;
+      const alreadySelected = selectedVertexIdsRef.current.includes(vertexId);
+
+      if (alreadySelected && selectedVertexIdsRef.current.length > 1) {
+        setIsMovingSelection(true);
+        isMovingSelectionRef.current = true;
+        moveStart.current = pos;
+        if (activeGraph) movingVerticesStartRef.current = snapshotSelectedVertices(activeGraph);
+        dragHistoryPushedRef.current = false;
+      } else {
+        selectVertex(vertexId, e.shiftKey);
+        setIsDragging(true);
+        dragVertexRef.current = vertexId;
+        setDragVertex(vertexId);
+        dragHistoryPushedRef.current = false;
+        dragOriginRef.current = pos;
+      }
+    } else if (edge) {
+      selectEdge(edge.id, e.shiftKey);
+    } else {
+      const targetGraph = getGraphContainingPoint(pos.x, pos.y);
+      if (targetGraph) {
+        setActiveGraph(targetGraph.id);
+        return;
+      }
+      clearSelection();
+      setIsPanning(true);
+      panStart.current = { x: pos.x - panRef.current.x, y: pos.y - panRef.current.y };
+    }
+  }
+
+  function handleDoubleClick(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (readOnly) return;
+    const pos = getCanvasPos(e.clientX, e.clientY);
+
+    cancelEdgeCreationLocal();
+
+    const hitResult = getVertexAtPosition(pos.x, pos.y);
+    if (hitResult) {
+      if (hitResult.graphId !== activeGraphId) setActiveGraph(hitResult.graphId);
+      onVertexDoubleClick?.(hitResult.vertex.id, e.clientX, e.clientY);
+      return;
+    }
+
+    const edge = getEdgeAtPosition(pos.x, pos.y, activeGraph || undefined);
+    if (edge) {
+      onEdgeDoubleClick?.(edge.id, e.clientX, e.clientY);
+      return;
+    }
+
+    if (activeGraph) {
+      const local = screenToGraph(pos.x, pos.y, activeGraph);
+      onCanvasDoubleClick?.(local.x, local.y, e.clientX, e.clientY);
     }
   }
 
@@ -1135,13 +1140,6 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       panRef.current = newPan;
       if (viewportRef) viewportRef.current = { pan: newPan, zoom: zoomRef.current };
       draw();
-      return;
-    }
-
-    if (isRubberBanding.current && selectionBoxRef.current) {
-      const sb = { ...selectionBoxRef.current, endX: pos.x, endY: pos.y };
-      selectionBoxRef.current = sb;
-      setSelectionBox({ ...sb });
       return;
     }
 
@@ -1177,30 +1175,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     }
   }
 
-  function handleMouseUp(e: React.MouseEvent<HTMLCanvasElement>) {
-    const pos = getCanvasPos(e.clientX, e.clientY);
-
-    if (isRubberBanding.current && selectionBoxRef.current) {
-      const sb = selectionBoxRef.current;
-      const minDist = 5;
-      if (Math.abs(sb.endX - sb.startX) > minDist || Math.abs(sb.endY - sb.startY) > minDist) {
-        const ids = getVerticesInRect(sb.startX, sb.startY, sb.endX, sb.endY);
-        if (ids.length > 0) {
-          const store = useGraphStore.getState();
-          if (e.shiftKey) {
-            for (const id of ids) store.selectVertex(id, true);
-          } else {
-            store.selectVertex(ids[0], false);
-            for (const id of ids.slice(1)) store.selectVertex(id, true);
-          }
-        }
-      }
-    }
-
-    isRubberBanding.current = false;
-    selectionBoxRef.current = null;
-    setSelectionBox(null);
-
+  function handleMouseUp() {
     setIsDragging(false);
     dragVertexRef.current = null;
     setDragVertex(null);
@@ -1215,10 +1190,32 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
 
   function handleContextMenu(e: React.MouseEvent<HTMLCanvasElement>) {
     e.preventDefault();
-    if (isCreatingEdge) cancelEdgeCreation();
-    isRubberBanding.current = false;
-    selectionBoxRef.current = null;
-    setSelectionBox(null);
+    if (readOnly) return;
+
+    if (isCreatingEdgeRef.current) {
+      cancelEdgeCreationLocal();
+      return;
+    }
+
+    const pos = getCanvasPos(e.clientX, e.clientY);
+
+    const hitResult = getVertexAtPosition(pos.x, pos.y);
+    if (hitResult) {
+      if (hitResult.graphId !== activeGraphId) setActiveGraph(hitResult.graphId);
+      onVertexDoubleClick?.(hitResult.vertex.id, e.clientX, e.clientY);
+      return;
+    }
+
+    const edge = getEdgeAtPosition(pos.x, pos.y, activeGraph || undefined);
+    if (edge) {
+      onEdgeDoubleClick?.(edge.id, e.clientX, e.clientY);
+      return;
+    }
+
+    if (activeGraph) {
+      const local = screenToGraph(pos.x, pos.y, activeGraph);
+      onCanvasDoubleClick?.(local.x, local.y, e.clientX, e.clientY);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -1228,11 +1225,8 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       selectedEdgeIds.forEach((id) => deleteEdge(id));
     }
     if (e.key === "Escape") {
-      cancelEdgeCreation();
+      cancelEdgeCreationLocal();
       clearSelection();
-      isRubberBanding.current = false;
-      selectionBoxRef.current = null;
-      setSelectionBox(null);
     }
   }
 
@@ -1284,67 +1278,44 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
       setMousePos(pos);
       touchActionRef.current = "none";
 
-      if (tool === "pan") {
-        touchActionRef.current = "pan";
-        panStart.current = { x: pos.x - panRef.current.x, y: pos.y - panRef.current.y };
-        return;
-      }
-
-      if (tool === "select") {
+      if (isCreatingEdgeRef.current) {
         const hitResult = getVertexAtPosition(pos.x, pos.y, activeGraph || undefined);
-        const edge = getEdgeAtPosition(pos.x, pos.y, activeGraph || undefined);
-        if (hitResult) {
-          const vertexId = hitResult.vertex.id;
-          const alreadySelected = selectedVertexIdsRef.current.includes(vertexId);
-          if (alreadySelected && selectedVertexIdsRef.current.length > 1) {
-            setIsMovingSelection(true);
-            isMovingSelectionRef.current = true;
-            moveStart.current = pos;
-            if (activeGraph) movingVerticesStartRef.current = snapshotSelectedVertices(activeGraph);
-            dragHistoryPushedRef.current = false;
-          } else {
-            selectVertex(vertexId, false);
-            setIsDragging(true);
-            dragVertexRef.current = vertexId;
-            setDragVertex(vertexId);
-            dragHistoryPushedRef.current = false;
-            dragOriginRef.current = pos;
-          }
-        } else if (edge) {
-          selectEdge(edge.id, false);
-        } else {
-          clearSelection();
+        if (hitResult && edgeSourceVertexIdRef.current) {
+          addEdge(edgeSourceVertexIdRef.current, hitResult.vertex.id);
         }
+        cancelEdgeCreationLocal();
         return;
       }
 
-      const hitResult = getVertexAtPosition(pos.x, pos.y, activeGraph || undefined);
-      const vertex = hitResult?.vertex;
+      const hitResult = getVertexAtPosition(pos.x, pos.y);
+      if (hitResult && hitResult.graphId !== activeGraphId) {
+        setActiveGraph(hitResult.graphId);
+        return;
+      }
+
       const edge = getEdgeAtPosition(pos.x, pos.y, activeGraph || undefined);
 
-      switch (tool) {
-        case "vertex":
-          if (!vertex && activeGraph) {
-            const local = screenToGraph(pos.x, pos.y, activeGraph);
-            addVertex(local.x, local.y);
-          }
-          break;
-        case "edge":
-          if (vertex) {
-            if (isCreatingEdge && edgeSourceId) {
-              addEdge(edgeSourceId, vertex.id);
-              cancelEdgeCreation();
-            } else {
-              startEdgeCreation(vertex.id);
-            }
-          } else {
-            cancelEdgeCreation();
-          }
-          break;
-        case "delete":
-          if (vertex) deleteVertex(vertex.id);
-          else if (edge) deleteEdge(edge.id);
-          break;
+      if (hitResult) {
+        const vertexId = hitResult.vertex.id;
+        const alreadySelected = selectedVertexIdsRef.current.includes(vertexId);
+        if (alreadySelected && selectedVertexIdsRef.current.length > 1) {
+          setIsMovingSelection(true);
+          isMovingSelectionRef.current = true;
+          moveStart.current = pos;
+          if (activeGraph) movingVerticesStartRef.current = snapshotSelectedVertices(activeGraph);
+          dragHistoryPushedRef.current = false;
+        } else {
+          selectVertex(vertexId, false);
+          setIsDragging(true);
+          dragVertexRef.current = vertexId;
+          setDragVertex(vertexId);
+          dragHistoryPushedRef.current = false;
+          dragOriginRef.current = pos;
+        }
+      } else if (edge) {
+        selectEdge(edge.id, false);
+      } else {
+        clearSelection();
       }
     }
   }
@@ -1452,13 +1423,13 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
     }
   }
 
-  let cursorStyle = "crosshair";
-  if (tool === "pan") {
-    cursorStyle = isPanning ? "grabbing" : "grab";
-  } else if (tool === "delete") {
-    cursorStyle = "pointer";
-  } else if (tool === "select" && (isDragging || isMovingSelection || isRubberBanding.current)) {
-    cursorStyle = isRubberBanding.current ? "crosshair" : "move";
+  let cursorStyle = "default";
+  if (isCreatingEdge) {
+    cursorStyle = "crosshair";
+  } else if (isPanning) {
+    cursorStyle = "grabbing";
+  } else if (isDragging || isMovingSelection) {
+    cursorStyle = "move";
   }
 
   return (
@@ -1470,6 +1441,7 @@ export const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
         onKeyDown={handleKeyDown}
         onWheel={handleWheel}
